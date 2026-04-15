@@ -12,7 +12,8 @@ A from-scratch PyTorch implementation of the Transformer model (Vaswani et al., 
 - Mixed precision training (FP16)
 - Label-smoothed cross entropy + Noam learning rate schedule
 - Beam search decoding with length penalty
-- Graceful Ctrl+C interrupt (saves checkpoint and resumes)
+- Graceful Ctrl+C / SIGTERM interrupt (saves checkpoint and resumes)
+- Atomic checkpoint writes + rolling emergency save (UPS / power-off safe)
 - Automatic training report generation
 - TensorBoard logging
 
@@ -104,6 +105,62 @@ python train.py --config configs/base.yaml --resume checkpoints/interrupted_step
 tensorboard --logdir checkpoints/logs
 ```
 
+### Running training in tmux (recommended for long runs)
+
+Training takes 1–5 days. Using `tmux` lets you detach from the session and safely close your terminal / SSH connection / Jupyter Lab tab without killing the training process.
+
+**Install tmux:**
+```bash
+# Ubuntu / Debian
+sudo apt install tmux
+# macOS
+brew install tmux
+```
+
+**Basic workflow:**
+```bash
+# 1. Start a new named session
+tmux new -s train
+
+# 2. Inside tmux, run training
+python train.py --config configs/base.yaml
+
+# 3. Detach (training keeps running):  Ctrl+b  then  d
+
+# 4. Re-attach later from anywhere (new SSH, new terminal, etc.)
+tmux attach -t train
+
+# 5. List sessions
+tmux ls
+
+# 6. Kill a session when done
+tmux kill-session -t train
+```
+
+**Useful keybindings (all prefixed with `Ctrl+b`):**
+
+| Keys | Action |
+|------|--------|
+| `d` | Detach from session |
+| `[` | Enter scroll mode (↑/↓/PgUp/PgDn to scroll, `q` to quit) |
+| `"` | Split pane horizontally (e.g. to run `nvidia-smi` alongside) |
+| `%` | Split pane vertically |
+| `o` | Switch between panes |
+| `x` | Close current pane |
+
+**Two-pane layout for monitoring:**
+```bash
+tmux new -s train
+# run training in top pane
+python train.py --config configs/base.yaml
+# Ctrl+b then "  (split horizontally)
+# Ctrl+b then o  (switch to bottom pane)
+watch -n 2 nvidia-smi
+# Ctrl+b then d  (detach — both panes keep running)
+```
+
+**Note:** tmux and the graceful-interrupt logic compose naturally. `Ctrl+b d` just detaches; it does NOT send SIGINT. To actually interrupt training cleanly, re-attach first (`tmux attach -t train`), then press `Ctrl+C` inside the session.
+
 ### 4. Translate
 ```bash
 # From a file
@@ -134,7 +191,8 @@ python translate.py --checkpoint checkpoints/best.pt
 - `checkpoints/best.pt` — Best model (by validation BLEU)
 - `checkpoints/final.pt` — Final step checkpoint
 - `checkpoints/step_*.pt` — Periodic checkpoints (keeps last 5)
-- `checkpoints/interrupted_step_*.pt` — Saved on Ctrl+C
+- `checkpoints/interrupted_step_*.pt` — Saved on Ctrl+C / SIGTERM
+- `checkpoints/emergency.pt` — Rolling save every 500 steps (UPS / power-off fallback)
 - `checkpoints/training_report.txt` — Human-readable training summary
 - `checkpoints/logs/` — TensorBoard logs
 
