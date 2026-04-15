@@ -1,0 +1,51 @@
+# Transformer Big Configuration
+# ~213M parameters, higher BLEU ceiling but ~2-3x slower training
+
+model:
+  d_model: 1024
+  n_heads: 16
+  n_encoder_layers: 6
+  n_decoder_layers: 6
+  d_ff: 4096
+  dropout: 0.3              # Big uses higher dropout to prevent overfitting
+  max_seq_len: 256
+  vocab_size: 32000
+  share_embeddings: true
+
+training:
+  batch_size: 32768         # tokens per batch
+  max_sentences: 256
+  accumulate_steps: 1
+  max_steps: 300000
+  warmup_steps: 4000
+  lr: 0.0007
+  label_smoothing: 0.1
+  clip_grad_norm: 1.0
+  fp16: true
+  seed: 42
+  save_interval: 5000
+  eval_interval: 2000
+  log_interval: 100
+  patience: 10
+
+data:
+  src_lang: zh
+  tgt_lang: en
+  train_src: data/train.zh
+  train_tgt: data/train.en
+  valid_src: data/valid.zh
+  valid_tgt: data/valid.en
+  test_src: data/test.zh
+  test_tgt: data/test.en
+  spm_model: data/spm.model
+  max_tokens: 256
+  num_workers: 4
+
+inference:
+  beam_size: 5
+  length_penalty: 1.0
+  max_decode_len: 256
+
+checkpoint:
+  dir: checkpoints_big      # separate checkpoint dir
+  keep_last: 5
