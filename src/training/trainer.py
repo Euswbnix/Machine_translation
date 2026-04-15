@@ -112,6 +112,9 @@ class Trainer:
         self.eval_interval = train_cfg["eval_interval"]
         self.log_interval = train_cfg["log_interval"]
         self.patience = train_cfg.get("patience", 10)
+        # Emergency rolling save: overwrites emergency.pt every N steps.
+        # Caps max data loss on UPS power-off to this many steps.
+        self.emergency_save_interval = train_cfg.get("emergency_save_interval", 500)
 
         # Training history for report
         self.train_start_time = None
@@ -214,6 +217,15 @@ class Trainer:
                         self._save_checkpoint(f"step_{self.global_step}.pt")
                         self._cleanup_checkpoints()
 
+                    # Emergency rolling save: cheap, overwrites single file.
+                    # Protects against UPS power-off between regular saves.
+                    if (
+                        self.emergency_save_interval > 0
+                        and self.global_step % self.emergency_save_interval == 0
+                        and self.global_step > 0
+                    ):
+                        self._save_checkpoint("emergency.pt")
+
             self._save_checkpoint("final.pt")
             self._generate_report("max_steps_reached")
             print(f"Training complete. Best BLEU: {self.best_bleu:.2f}")
@@ -292,8 +304,13 @@ class Trainer:
         return bleu
 
     def _save_checkpoint(self, filename: str):
-        """Save model checkpoint."""
+        """Save model checkpoint atomically (write to tmp + rename).
+
+        Atomic save is important for robustness against UPS/power events:
+        if the process is killed mid-write, we don't corrupt the main file.
+        """
         path = self.ckpt_dir / filename
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
         torch.save(
             {
                 "model": self.model.state_dict(),
@@ -304,8 +321,10 @@ class Trainer:
                 "best_bleu": self.best_bleu,
                 "config": self.config,
             },
-            path,
+            tmp_path,
         )
+        # Atomic rename: POSIX guarantees this is either fully done or not done.
+        tmp_path.replace(path)
 
     def load_checkpoint(self, path: str):
         """Load a checkpoint to resume training."""

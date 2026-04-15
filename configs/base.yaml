@@ -27,6 +27,7 @@ training:
   eval_interval: 2000
   log_interval: 100
   patience: 10             # early stopping patience (eval intervals)
+  emergency_save_interval: 500  # rolling save for UPS/power-off safety (0 to disable)
 
 data:
   src_lang: zh
