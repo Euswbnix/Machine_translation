@@ -1,6 +1,7 @@
 """Main training loop for the Transformer model."""
 
 import datetime
+import os
 import signal
 import time
 from pathlib import Path
@@ -15,7 +16,7 @@ from src.data.tokenizer import Tokenizer, PAD_ID
 from src.data.dataset import create_dataloader
 from src.training.loss import LabelSmoothedCrossEntropy
 from src.training.optimizer import TransformerScheduler
-from src.inference.translate import beam_search_translate
+from src.inference.translate import beam_search_translate, TranslationInterrupted
 from src.evaluate import compute_bleu
 
 
@@ -126,9 +127,16 @@ class Trainer:
 
         # Graceful interrupt handling
         self._interrupted = False
+        self._main_pid = os.getpid()
 
     def _handle_signal(self, signum, frame):
         """Handle SIGINT/SIGTERM: set flag to save and exit after current step."""
+        # Only the main process should react. DataLoader workers (and any
+        # other fork()ed children) inherit this handler; we rely on
+        # worker_init_fn to ignore signals there, but this PID check is a
+        # belt-and-suspenders safeguard so we never print the message twice.
+        if os.getpid() != self._main_pid:
+            return
         if self._interrupted:
             print("\nForce exiting...")
             raise SystemExit(1)
@@ -194,6 +202,12 @@ class Trainer:
 
                     if self.global_step % self.eval_interval == 0 and self.global_step > 0:
                         bleu = self._evaluate()
+                        if bleu is None:
+                            # Eval was aborted by Ctrl+C; let the next loop
+                            # iteration see self._interrupted and save.
+                            print(f"Step {self.global_step:>7d} | Eval interrupted, skipping BLEU update")
+                            self.model.train()
+                            continue
                         print(f"Step {self.global_step:>7d} | Valid BLEU: {bleu:.2f}")
                         self.writer.add_scalar("valid/bleu", bleu, self.global_step)
                         self.history["valid_bleu"].append((self.global_step, bleu))
@@ -268,8 +282,12 @@ class Trainer:
         return loss.item() * self.accumulate_steps, n_tokens
 
     @torch.no_grad()
-    def _evaluate(self) -> float:
-        """Evaluate on validation set, returns BLEU score."""
+    def _evaluate(self) -> float | None:
+        """Evaluate on validation set, returns BLEU score.
+
+        Returns None if eval was interrupted by Ctrl+C (so the caller can
+        proceed to save and exit without a stale BLEU update).
+        """
         self.model.eval()
 
         data_cfg = self.config["data"]
@@ -279,16 +297,21 @@ class Trainer:
         src_lines = Path(data_cfg["valid_src"]).read_text().strip().split("\n")
         ref_lines = Path(data_cfg["valid_tgt"]).read_text().strip().split("\n")
 
-        # Translate
-        hypotheses = beam_search_translate(
-            model=self.model,
-            tokenizer=self.tokenizer,
-            src_sentences=src_lines,
-            beam_size=infer_cfg["beam_size"],
-            max_len=infer_cfg["max_decode_len"],
-            length_penalty=infer_cfg["length_penalty"],
-            device=self.device,
-        )
+        # Translate (responsive to Ctrl+C between batches)
+        try:
+            hypotheses = beam_search_translate(
+                model=self.model,
+                tokenizer=self.tokenizer,
+                src_sentences=src_lines,
+                beam_size=infer_cfg["beam_size"],
+                max_len=infer_cfg["max_decode_len"],
+                length_penalty=infer_cfg["length_penalty"],
+                device=self.device,
+                should_stop=lambda: self._interrupted,
+            )
+        except TranslationInterrupted as e:
+            print(f"  Eval aborted: {e}")
+            return None
 
         bleu = compute_bleu(hypotheses, ref_lines, tgt_lang=data_cfg["tgt_lang"])
 

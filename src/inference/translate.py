@@ -5,11 +5,18 @@ dramatically speeds up evaluation (~10-20x) by processing multiple
 sentences simultaneously on the GPU.
 """
 
+from typing import Callable, Optional
+
 import torch
 from tqdm import tqdm
 
 from src.model import Transformer
 from src.data.tokenizer import Tokenizer, BOS_ID, EOS_ID, PAD_ID
+
+
+class TranslationInterrupted(Exception):
+    """Raised when beam search is aborted via should_stop() callback."""
+    pass
 
 
 @torch.no_grad()
@@ -150,6 +157,7 @@ def beam_search_translate(
     length_penalty: float = 1.0,
     device: torch.device = torch.device("cpu"),
     batch_size: int = 32,
+    should_stop: Optional[Callable[[], bool]] = None,
 ) -> list[str]:
     """Translate a list of source sentences using batched beam search.
 
@@ -165,9 +173,15 @@ def beam_search_translate(
         length_penalty: Length penalty alpha.
         device: Computation device.
         batch_size: Number of sentences per batch.
+        should_stop: Optional callable; if it returns True between batches,
+            aborts decoding by raising TranslationInterrupted. Used to
+            respond promptly to Ctrl+C during long evals.
 
     Returns:
         List of translated sentences in the original order.
+
+    Raises:
+        TranslationInterrupted: If should_stop() returned True mid-decode.
     """
     model.eval()
     n = len(src_sentences)
@@ -182,6 +196,12 @@ def beam_search_translate(
     # Decode in batches
     translations_sorted: list[str] = [""] * n
     for start in tqdm(range(0, n, batch_size), desc="Translating", leave=False):
+        # Check for interrupt before starting each batch — keeps eval
+        # responsive to Ctrl+C without leaving the GPU mid-step.
+        if should_stop is not None and should_stop():
+            raise TranslationInterrupted(
+                f"Aborted at batch {start // batch_size + 1}/{(n + batch_size - 1) // batch_size}"
+            )
         end = min(start + batch_size, n)
         batch = sorted_ids[start:end]
 

@@ -5,6 +5,7 @@ offset indices, and cached to disk after the first tokenization pass.
 """
 
 import random
+import signal
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,18 @@ from torch.utils.data import Dataset, DataLoader, Sampler
 from tqdm import tqdm
 
 from .tokenizer import Tokenizer, PAD_ID
+
+
+def _worker_init_ignore_signals(worker_id: int):
+    """Make DataLoader workers ignore SIGINT/SIGTERM.
+
+    Without this, Ctrl+C in the terminal sends SIGINT to the whole process
+    group: main + every worker each run the parent's signal handler, causing
+    the "Interrupt received..." message to print once per worker. We want
+    only the main process to handle the signal.
+    """
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
 
 class TranslationDataset(Dataset):
@@ -205,4 +218,5 @@ def create_dataloader(
         collate_fn=collate_fn,
         num_workers=num_workers,
         pin_memory=True,
+        worker_init_fn=_worker_init_ignore_signals if num_workers > 0 else None,
     )
