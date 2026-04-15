@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import Dataset, DataLoader, Sampler
+from tqdm import tqdm
 
 from .tokenizer import Tokenizer, PAD_ID
 
@@ -23,9 +24,13 @@ class TranslationDataset(Dataset):
         self.max_tokens = max_tokens
         self.pairs = []
 
+        # Count lines for progress bar
+        with open(src_path, "r") as f:
+            n_lines = sum(1 for _ in f)
+
         total = 0
         with open(src_path, "r") as f_src, open(tgt_path, "r") as f_tgt:
-            for src_line, tgt_line in zip(f_src, f_tgt):
+            for src_line, tgt_line in tqdm(zip(f_src, f_tgt), total=n_lines, desc="Loading data"):
                 total += 1
                 src_line = src_line.strip()
                 tgt_line = tgt_line.strip()
