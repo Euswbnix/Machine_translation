@@ -278,7 +278,7 @@ class Trainer:
             device=self.device,
         )
 
-        bleu = compute_bleu(hypotheses, ref_lines)
+        bleu = compute_bleu(hypotheses, ref_lines, tgt_lang=data_cfg["tgt_lang"])
         return bleu
 
     def _save_checkpoint(self, filename: str):
