@@ -23,18 +23,21 @@ class TranslationDataset(Dataset):
         self.max_tokens = max_tokens
         self.pairs = []
 
-        src_lines = Path(src_path).read_text().strip().split("\n")
-        tgt_lines = Path(tgt_path).read_text().strip().split("\n")
-        assert len(src_lines) == len(tgt_lines), "Source and target must have same number of lines"
+        total = 0
+        with open(src_path, "r") as f_src, open(tgt_path, "r") as f_tgt:
+            for src_line, tgt_line in zip(f_src, f_tgt):
+                total += 1
+                src_line = src_line.strip()
+                tgt_line = tgt_line.strip()
+                if not src_line or not tgt_line:
+                    continue
+                src_ids = tokenizer.encode(src_line)
+                tgt_ids = tokenizer.encode(tgt_line)
+                # Filter out sequences that are too long
+                if len(src_ids) <= max_tokens and len(tgt_ids) <= max_tokens:
+                    self.pairs.append((src_ids, tgt_ids))
 
-        for src_line, tgt_line in zip(src_lines, tgt_lines):
-            src_ids = tokenizer.encode(src_line)
-            tgt_ids = tokenizer.encode(tgt_line)
-            # Filter out sequences that are too long
-            if len(src_ids) <= max_tokens and len(tgt_ids) <= max_tokens:
-                self.pairs.append((src_ids, tgt_ids))
-
-        print(f"Loaded {len(self.pairs)} pairs (filtered from {len(src_lines)})")
+        print(f"Loaded {len(self.pairs)} pairs (filtered from {total})")
 
     def __len__(self) -> int:
         return len(self.pairs)

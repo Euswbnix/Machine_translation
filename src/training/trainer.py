@@ -7,7 +7,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
 
 from src.model import Transformer
@@ -73,7 +73,7 @@ class Trainer:
 
         # Mixed precision
         self.use_fp16 = train_cfg.get("fp16", True) and device.type == "cuda"
-        self.scaler = GradScaler(enabled=self.use_fp16)
+        self.scaler = GradScaler("cuda", enabled=self.use_fp16)
 
         # Data loaders
         self.train_loader = create_dataloader(
