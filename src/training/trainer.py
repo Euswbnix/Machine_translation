@@ -112,7 +112,12 @@ class Trainer:
         self.save_interval = train_cfg["save_interval"]
         self.eval_interval = train_cfg["eval_interval"]
         self.log_interval = train_cfg["log_interval"]
+        # Early stopping: set patience=0 or early_stopping=false to disable.
         self.patience = train_cfg.get("patience", 10)
+        self.early_stopping = train_cfg.get("early_stopping", True) and self.patience > 0
+        # Only enforce early stopping after this many global steps. Prevents
+        # stopping during the "mode collapse" phase where BLEU is noise.
+        self.min_steps_before_early_stop = train_cfg.get("min_steps_before_early_stop", 100000)
         # Emergency rolling save: overwrites emergency.pt every N steps.
         # Caps max data loss on UPS power-off to this many steps.
         self.emergency_save_interval = train_cfg.get("emergency_save_interval", 500)
@@ -219,7 +224,11 @@ class Trainer:
                             print(f"  New best BLEU: {bleu:.2f}")
                         else:
                             self.patience_counter += 1
-                            if self.patience_counter >= self.patience:
+                            if (
+                                self.early_stopping
+                                and self.global_step >= self.min_steps_before_early_stop
+                                and self.patience_counter >= self.patience
+                            ):
                                 print(f"Early stopping at step {self.global_step}")
                                 self._save_checkpoint("final.pt")
                                 self._generate_report("early_stopping")

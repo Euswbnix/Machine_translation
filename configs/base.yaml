@@ -27,6 +27,8 @@ training:
   eval_interval: 2000
   log_interval: 100
   patience: 10             # early stopping patience (eval intervals)
+  early_stopping: true     # set false to disable entirely
+  min_steps_before_early_stop: 150000  # don't early-stop before this global_step (avoids stopping during mode-collapse phase)
   emergency_save_interval: 500  # rolling save for UPS/power-off safety (0 to disable)
 
 data:
