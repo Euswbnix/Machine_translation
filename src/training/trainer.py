@@ -1,5 +1,7 @@
 """Main training loop for the Transformer model."""
 
+import datetime
+import signal
 import time
 from pathlib import Path
 
@@ -111,68 +113,115 @@ class Trainer:
         self.log_interval = train_cfg["log_interval"]
         self.patience = train_cfg.get("patience", 10)
 
+        # Training history for report
+        self.train_start_time = None
+        self.history = {
+            "train_loss": [],   # (step, loss)
+            "valid_bleu": [],   # (step, bleu)
+            "lr": [],           # (step, lr)
+        }
+
+        # Graceful interrupt handling
+        self._interrupted = False
+
+    def _handle_signal(self, signum, frame):
+        """Handle SIGINT/SIGTERM: set flag to save and exit after current step."""
+        if self._interrupted:
+            print("\nForce exiting...")
+            raise SystemExit(1)
+        print(f"\nInterrupt received (signal {signum}). "
+              "Saving checkpoint after current step... (press again to force quit)")
+        self._interrupted = True
+
     def train(self):
         """Main training loop."""
+        # Register signal handlers
+        prev_sigint = signal.signal(signal.SIGINT, self._handle_signal)
+        prev_sigterm = signal.signal(signal.SIGTERM, self._handle_signal)
+
         print(f"Starting training for {self.max_steps} steps...")
+        print("Press Ctrl+C to gracefully stop and save checkpoint.")
         self.model.train()
+        self.train_start_time = time.time()
 
         total_loss = 0.0
         total_tokens = 0
         start_time = time.time()
 
-        while self.global_step < self.max_steps:
-            for batch in self.train_loader:
-                if self.global_step >= self.max_steps:
-                    break
+        try:
+            while self.global_step < self.max_steps:
+                for batch in self.train_loader:
+                    if self.global_step >= self.max_steps:
+                        break
 
-                loss, n_tokens = self._train_step(batch)
-                total_loss += loss * n_tokens
-                total_tokens += n_tokens
+                    # Check for graceful interrupt
+                    if self._interrupted:
+                        print(f"Saving checkpoint at step {self.global_step}...")
+                        self._save_checkpoint(f"interrupted_step_{self.global_step}.pt")
+                        self._generate_report("interrupted")
+                        print(f"Checkpoint saved. Resume with: --resume checkpoints/interrupted_step_{self.global_step}.pt")
+                        return
 
-                if self.global_step % self.log_interval == 0 and self.global_step > 0:
-                    avg_loss = total_loss / total_tokens
-                    elapsed = time.time() - start_time
-                    tok_per_sec = total_tokens / elapsed
-                    lr = self.scheduler.current_lr
+                    loss, n_tokens = self._train_step(batch)
+                    total_loss += loss * n_tokens
+                    total_tokens += n_tokens
 
-                    print(
-                        f"Step {self.global_step:>7d} | "
-                        f"Loss {avg_loss:.4f} | "
-                        f"LR {lr:.2e} | "
-                        f"Tok/s {tok_per_sec:.0f}"
-                    )
-                    self.writer.add_scalar("train/loss", avg_loss, self.global_step)
-                    self.writer.add_scalar("train/lr", lr, self.global_step)
-                    self.writer.add_scalar("train/tok_per_sec", tok_per_sec, self.global_step)
+                    if self.global_step % self.log_interval == 0 and self.global_step > 0:
+                        avg_loss = total_loss / total_tokens
+                        elapsed = time.time() - start_time
+                        tok_per_sec = total_tokens / elapsed
+                        lr = self.scheduler.current_lr
 
-                    total_loss = 0.0
-                    total_tokens = 0
-                    start_time = time.time()
+                        print(
+                            f"Step {self.global_step:>7d} | "
+                            f"Loss {avg_loss:.4f} | "
+                            f"LR {lr:.2e} | "
+                            f"Tok/s {tok_per_sec:.0f}"
+                        )
+                        self.writer.add_scalar("train/loss", avg_loss, self.global_step)
+                        self.writer.add_scalar("train/lr", lr, self.global_step)
+                        self.writer.add_scalar("train/tok_per_sec", tok_per_sec, self.global_step)
 
-                if self.global_step % self.eval_interval == 0 and self.global_step > 0:
-                    bleu = self._evaluate()
-                    print(f"Step {self.global_step:>7d} | Valid BLEU: {bleu:.2f}")
-                    self.writer.add_scalar("valid/bleu", bleu, self.global_step)
+                        self.history["train_loss"].append((self.global_step, avg_loss))
+                        self.history["lr"].append((self.global_step, lr))
 
-                    if bleu > self.best_bleu:
-                        self.best_bleu = bleu
-                        self.patience_counter = 0
-                        self._save_checkpoint("best.pt")
-                        print(f"  New best BLEU: {bleu:.2f}")
-                    else:
-                        self.patience_counter += 1
-                        if self.patience_counter >= self.patience:
-                            print(f"Early stopping at step {self.global_step}")
-                            return
+                        total_loss = 0.0
+                        total_tokens = 0
+                        start_time = time.time()
 
-                    self.model.train()
+                    if self.global_step % self.eval_interval == 0 and self.global_step > 0:
+                        bleu = self._evaluate()
+                        print(f"Step {self.global_step:>7d} | Valid BLEU: {bleu:.2f}")
+                        self.writer.add_scalar("valid/bleu", bleu, self.global_step)
+                        self.history["valid_bleu"].append((self.global_step, bleu))
 
-                if self.global_step % self.save_interval == 0 and self.global_step > 0:
-                    self._save_checkpoint(f"step_{self.global_step}.pt")
-                    self._cleanup_checkpoints()
+                        if bleu > self.best_bleu:
+                            self.best_bleu = bleu
+                            self.patience_counter = 0
+                            self._save_checkpoint("best.pt")
+                            print(f"  New best BLEU: {bleu:.2f}")
+                        else:
+                            self.patience_counter += 1
+                            if self.patience_counter >= self.patience:
+                                print(f"Early stopping at step {self.global_step}")
+                                self._save_checkpoint("final.pt")
+                                self._generate_report("early_stopping")
+                                return
 
-        self._save_checkpoint("final.pt")
-        print(f"Training complete. Best BLEU: {self.best_bleu:.2f}")
+                        self.model.train()
+
+                    if self.global_step % self.save_interval == 0 and self.global_step > 0:
+                        self._save_checkpoint(f"step_{self.global_step}.pt")
+                        self._cleanup_checkpoints()
+
+            self._save_checkpoint("final.pt")
+            self._generate_report("max_steps_reached")
+            print(f"Training complete. Best BLEU: {self.best_bleu:.2f}")
+
+        finally:
+            # Restore original signal handlers
+            signal.signal(signal.SIGINT, prev_sigint)
+            signal.signal(signal.SIGTERM, prev_sigterm)
 
     def _train_step(self, batch: dict) -> tuple[float, int]:
         """Single training step (forward + backward + optimizer step)."""
@@ -265,3 +314,128 @@ class Trainer:
         step_ckpts = sorted(self.ckpt_dir.glob("step_*.pt"), key=lambda p: p.stat().st_mtime)
         for ckpt in step_ckpts[:-keep]:
             ckpt.unlink()
+
+    def _generate_report(self, stop_reason: str):
+        """Generate a training report as a plain text file."""
+        elapsed = time.time() - self.train_start_time
+        hours, remainder = divmod(int(elapsed), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        elapsed_str = f"{hours}h {minutes}m {seconds}s"
+
+        model_cfg = self.config["model"]
+        train_cfg = self.config["training"]
+        data_cfg = self.config["data"]
+        n_params = sum(p.numel() for p in self.model.parameters())
+
+        # Build report
+        lines = []
+        lines.append("=" * 60)
+        lines.append("       TRANSFORMER TRAINING REPORT")
+        lines.append("=" * 60)
+        lines.append("")
+
+        # General info
+        lines.append(f"Date:            {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        lines.append(f"Stop reason:     {stop_reason}")
+        lines.append(f"Total steps:     {self.global_step:,}")
+        lines.append(f"Training time:   {elapsed_str}")
+        lines.append(f"Best BLEU:       {self.best_bleu:.2f}")
+        lines.append("")
+
+        # Model config
+        lines.append("-" * 60)
+        lines.append("MODEL")
+        lines.append("-" * 60)
+        lines.append(f"Architecture:    Transformer (Vaswani et al. 2017)")
+        lines.append(f"Parameters:      {n_params:,}")
+        lines.append(f"d_model:         {model_cfg['d_model']}")
+        lines.append(f"n_heads:         {model_cfg['n_heads']}")
+        lines.append(f"Encoder layers:  {model_cfg['n_encoder_layers']}")
+        lines.append(f"Decoder layers:  {model_cfg['n_decoder_layers']}")
+        lines.append(f"FFN dim:         {model_cfg['d_ff']}")
+        lines.append(f"Dropout:         {model_cfg['dropout']}")
+        lines.append(f"Vocab size:      {model_cfg['vocab_size']}")
+        lines.append(f"Max seq len:     {model_cfg['max_seq_len']}")
+        lines.append(f"Share embeddings:{model_cfg['share_embeddings']}")
+        lines.append("")
+
+        # Training config
+        lines.append("-" * 60)
+        lines.append("TRAINING")
+        lines.append("-" * 60)
+        lines.append(f"Batch size:      {train_cfg['batch_size']} tokens")
+        lines.append(f"Max sentences:   {train_cfg['max_sentences']}")
+        lines.append(f"Warmup steps:    {train_cfg['warmup_steps']}")
+        lines.append(f"Label smoothing: {train_cfg['label_smoothing']}")
+        lines.append(f"FP16:            {train_cfg.get('fp16', False)}")
+        lines.append(f"Grad clip norm:  {train_cfg.get('clip_grad_norm', 1.0)}")
+        lines.append(f"Seed:            {train_cfg['seed']}")
+        lines.append("")
+
+        # Data
+        lines.append("-" * 60)
+        lines.append("DATA")
+        lines.append("-" * 60)
+        lines.append(f"Language pair:   {data_cfg['src_lang']} -> {data_cfg['tgt_lang']}")
+        lines.append(f"Train src:       {data_cfg['train_src']}")
+        lines.append(f"Train tgt:       {data_cfg['train_tgt']}")
+        lines.append(f"Valid src:       {data_cfg['valid_src']}")
+        lines.append(f"Valid tgt:       {data_cfg['valid_tgt']}")
+        lines.append(f"SPM model:       {data_cfg['spm_model']}")
+        lines.append("")
+
+        # Device info
+        lines.append("-" * 60)
+        lines.append("DEVICE")
+        lines.append("-" * 60)
+        if self.device.type == "cuda":
+            lines.append(f"GPU:             {torch.cuda.get_device_name()}")
+            vram = torch.cuda.get_device_properties(0).total_mem / 1e9
+            lines.append(f"VRAM:            {vram:.1f} GB")
+        else:
+            lines.append(f"Device:          CPU")
+        lines.append("")
+
+        # Training loss history
+        lines.append("-" * 60)
+        lines.append("TRAINING LOSS HISTORY")
+        lines.append("-" * 60)
+        lines.append(f"{'Step':>10s}  {'Loss':>10s}")
+        for step, loss in self.history["train_loss"]:
+            lines.append(f"{step:>10d}  {loss:>10.4f}")
+        lines.append("")
+
+        # BLEU history
+        lines.append("-" * 60)
+        lines.append("VALIDATION BLEU HISTORY")
+        lines.append("-" * 60)
+        lines.append(f"{'Step':>10s}  {'BLEU':>10s}")
+        for step, bleu in self.history["valid_bleu"]:
+            lines.append(f"{step:>10d}  {bleu:>10.2f}")
+        lines.append("")
+
+        # Learning rate history (sampled)
+        lines.append("-" * 60)
+        lines.append("LEARNING RATE HISTORY (sampled)")
+        lines.append("-" * 60)
+        lines.append(f"{'Step':>10s}  {'LR':>12s}")
+        lr_history = self.history["lr"]
+        # Sample at most 30 points to keep report concise
+        if len(lr_history) > 30:
+            step_size = len(lr_history) // 30
+            lr_sampled = lr_history[::step_size] + [lr_history[-1]]
+        else:
+            lr_sampled = lr_history
+        for step, lr in lr_sampled:
+            lines.append(f"{step:>10d}  {lr:>12.2e}")
+        lines.append("")
+
+        lines.append("=" * 60)
+        lines.append("END OF REPORT")
+        lines.append("=" * 60)
+
+        report_text = "\n".join(lines) + "\n"
+
+        report_path = self.ckpt_dir / "training_report.txt"
+        report_path.write_text(report_text)
+        print(f"Training report saved to {report_path}")
