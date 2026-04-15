@@ -13,9 +13,9 @@ model:
   share_embeddings: true
 
 training:
-  batch_size: 32768         # tokens per batch
-  max_sentences: 256
-  accumulate_steps: 1
+  batch_size: 8192          # tokens per batch (Big is memory-heavy)
+  max_sentences: 64
+  accumulate_steps: 4       # effective batch = 32K
   max_steps: 300000
   warmup_steps: 4000
   lr: 0.0007

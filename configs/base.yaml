@@ -13,9 +13,9 @@ model:
   share_embeddings: true   # share src/tgt/output embeddings
 
 training:
-  batch_size: 32768        # tokens per batch (not sentences)
-  max_sentences: 256       # max sentences per batch
-  accumulate_steps: 1      # gradient accumulation
+  batch_size: 16384        # tokens per batch (not sentences)
+  max_sentences: 128       # max sentences per batch
+  accumulate_steps: 2      # gradient accumulation (keeps effective batch = 32K)
   max_steps: 300000
   warmup_steps: 4000
   lr: 0.0007               # peak learning rate
