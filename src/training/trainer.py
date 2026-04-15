@@ -279,6 +279,16 @@ class Trainer:
         )
 
         bleu = compute_bleu(hypotheses, ref_lines, tgt_lang=data_cfg["tgt_lang"])
+
+        # Print a few samples for debugging
+        print("  --- Sample translations ---")
+        for i in [0, 100, 500]:
+            if i < len(src_lines):
+                print(f"  SRC: {src_lines[i][:100]}")
+                print(f"  HYP: {hypotheses[i][:100]}")
+                print(f"  REF: {ref_lines[i][:100]}")
+                print()
+
         return bleu
 
     def _save_checkpoint(self, filename: str):
