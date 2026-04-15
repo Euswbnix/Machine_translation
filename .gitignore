@@ -1,0 +1,17 @@
+# Training data (too large for git)
+data/*.zh
+data/*.en
+data/spm.model
+data/spm.vocab
+
+# Checkpoints
+checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Logs
+*.log
+runs/
