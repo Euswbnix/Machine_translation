@@ -19,6 +19,7 @@ training:
   max_steps: 300000
   warmup_steps: 4000
   lr: 0.0007               # peak learning rate
+  lr_scale: 2.0            # multiplier on Noam schedule (1.0=paper, 2.0=faster convergence)
   label_smoothing: 0.1
   clip_grad_norm: 1.0
   fp16: true
