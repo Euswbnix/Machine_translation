@@ -19,7 +19,8 @@ training:
   max_steps: 800000        # ~200K optimizer updates, ~8 epochs on 25M pairs
   warmup_steps: 4000
   lr: 0.0007               # peak learning rate
-  lr_scale: 1.0            # back to paper default; 2.0 caused divergence around loss 4.0
+  lr_scale: 1.5            # 2.0 diverged at loss 4.0, 1.0 too slow at 2.4e-4
+  min_lr: 0.0003           # LR floor — Noam decay won't go below this
   label_smoothing: 0.1
   clip_grad_norm: 1.0
   fp16: true

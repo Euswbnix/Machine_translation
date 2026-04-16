@@ -71,6 +71,7 @@ class Trainer:
             d_model=model_cfg["d_model"],
             warmup_steps=train_cfg["warmup_steps"],
             lr_scale=train_cfg.get("lr_scale", 1.0),
+            min_lr=train_cfg.get("min_lr", 0.0),
         )
 
         # Mixed precision

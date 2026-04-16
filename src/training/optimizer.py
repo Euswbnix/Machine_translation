@@ -17,11 +17,13 @@ class TransformerScheduler:
         d_model: int,
         warmup_steps: int = 4000,
         lr_scale: float = 1.0,
+        min_lr: float = 0.0,
     ):
         self.optimizer = optimizer
         self.d_model = d_model
         self.warmup_steps = warmup_steps
         self.lr_scale = lr_scale
+        self.min_lr = min_lr
         self._step = 0
 
     def step(self):
@@ -33,11 +35,12 @@ class TransformerScheduler:
 
     def _get_lr(self) -> float:
         step = max(self._step, 1)
-        return (
+        noam_lr = (
             self.lr_scale
             * (self.d_model ** -0.5)
             * min(step ** -0.5, step * self.warmup_steps ** -1.5)
         )
+        return max(noam_lr, self.min_lr)
 
     @property
     def current_lr(self) -> float:
