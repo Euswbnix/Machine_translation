@@ -201,7 +201,13 @@ class Trainer:
         prev_sigint = signal.signal(signal.SIGINT, self._handle_signal)
         prev_sigterm = signal.signal(signal.SIGTERM, self._handle_signal)
 
+        # Epoch tracking
+        n_batches = len(self.train_loader.batch_sampler)
+        self._epoch = self.global_step // n_batches
+        self._epoch_step = self.global_step % n_batches  # steps into current epoch
+
         print(f"Starting training for {self.max_steps} steps...")
+        print(f"  {n_batches:,} batches/epoch, resuming at epoch {self._epoch + 1} (step {self._epoch_step}/{n_batches})")
         print("Press Ctrl+C to gracefully stop and save checkpoint.")
         self.model.train()
         self.train_start_time = time.time()
@@ -299,6 +305,15 @@ class Trainer:
                         and self.global_step > 0
                     ):
                         self._save_checkpoint("emergency.pt")
+
+                # End of epoch (inner for-loop exhausted)
+                self._epoch += 1
+                elapsed_total = time.time() - self.train_start_time
+                h, m = divmod(int(elapsed_total), 3600)
+                m = m // 60
+                print(f"{'='*60}")
+                print(f"  End of epoch {self._epoch} | Step {self.global_step:,} | Elapsed {h}h{m:02d}m")
+                print(f"{'='*60}")
 
             self._save_checkpoint("final.pt")
             self._generate_report("max_steps_reached")
