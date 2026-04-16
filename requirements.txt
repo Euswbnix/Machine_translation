@@ -6,3 +6,4 @@ tqdm>=4.65
 datasets>=2.14
 numpy>=1.24
 tensorboard>=2.14
+matplotlib>=3.7

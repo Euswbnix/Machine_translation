@@ -6,6 +6,10 @@ import signal
 import time
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")  # non-interactive backend for headless servers
+import matplotlib.pyplot as plt
+
 import torch
 import torch.nn as nn
 from torch.amp import GradScaler, autocast
@@ -591,3 +595,91 @@ class Trainer:
         report_path = self.ckpt_dir / "training_report.txt"
         report_path.write_text(report_text)
         print(f"Training report saved to {report_path}")
+
+        # Generate training curves
+        self._plot_curves()
+
+    def _plot_curves(self):
+        """Save training curves as PNG to the project root directory."""
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig.suptitle("Transformer Training Curves", fontsize=16, fontweight="bold")
+
+        # 1. Training loss
+        ax = axes[0, 0]
+        if self.history["train_loss"]:
+            steps, losses = zip(*self.history["train_loss"])
+            ax.plot(steps, losses, color="#2196F3", linewidth=0.8, alpha=0.6, label="raw")
+            # Smoothed line (EMA)
+            if len(losses) > 10:
+                smoothed = []
+                s = losses[0]
+                for l in losses:
+                    s = 0.95 * s + 0.05 * l
+                    smoothed.append(s)
+                ax.plot(steps, smoothed, color="#0D47A1", linewidth=1.5, label="smoothed")
+                ax.legend(fontsize=8)
+        ax.set_xlabel("Global Step")
+        ax.set_ylabel("Loss")
+        ax.set_title("Training Loss")
+        ax.grid(True, alpha=0.3)
+
+        # 2. Validation BLEU
+        ax = axes[0, 1]
+        if self.history["valid_bleu"]:
+            steps, bleus = zip(*self.history["valid_bleu"])
+            ax.plot(steps, bleus, color="#4CAF50", linewidth=1.5, marker="o", markersize=3)
+            ax.axhline(y=self.best_bleu, color="#E91E63", linestyle="--", linewidth=1, alpha=0.7,
+                        label=f"best={self.best_bleu:.2f}")
+            ax.legend(fontsize=8)
+        ax.set_xlabel("Global Step")
+        ax.set_ylabel("BLEU")
+        ax.set_title("Validation BLEU")
+        ax.grid(True, alpha=0.3)
+
+        # 3. Learning rate
+        ax = axes[1, 0]
+        if self.history["lr"]:
+            steps, lrs = zip(*self.history["lr"])
+            ax.plot(steps, lrs, color="#FF9800", linewidth=1.2)
+        ax.set_xlabel("Global Step")
+        ax.set_ylabel("Learning Rate")
+        ax.set_title("Learning Rate Schedule")
+        ax.ticklabel_format(axis="y", style="scientific", scilimits=(-4, -4))
+        ax.grid(True, alpha=0.3)
+
+        # 4. Loss vs BLEU overlay (dual y-axis)
+        ax1 = axes[1, 1]
+        if self.history["train_loss"]:
+            steps, losses = zip(*self.history["train_loss"])
+            # Subsample loss for this plot
+            if len(losses) > 100:
+                step_size = len(losses) // 100
+                steps_s = steps[::step_size]
+                losses_s = losses[::step_size]
+            else:
+                steps_s, losses_s = steps, losses
+            line1 = ax1.plot(steps_s, losses_s, color="#2196F3", linewidth=1, alpha=0.7, label="Loss")
+            ax1.set_xlabel("Global Step")
+            ax1.set_ylabel("Loss", color="#2196F3")
+            ax1.tick_params(axis="y", labelcolor="#2196F3")
+
+        ax2 = ax1.twinx()
+        if self.history["valid_bleu"]:
+            steps, bleus = zip(*self.history["valid_bleu"])
+            line2 = ax2.plot(steps, bleus, color="#4CAF50", linewidth=1.5, marker="o", markersize=3, label="BLEU")
+            ax2.set_ylabel("BLEU", color="#4CAF50")
+            ax2.tick_params(axis="y", labelcolor="#4CAF50")
+
+        # Combined legend
+        if self.history["train_loss"] and self.history["valid_bleu"]:
+            lines = line1 + line2
+            labels = [l.get_label() for l in lines]
+            ax1.legend(lines, labels, fontsize=8, loc="center right")
+        ax1.set_title("Loss vs BLEU")
+        ax1.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plot_path = Path("training_curves.png")
+        fig.savefig(plot_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Training curves saved to {plot_path}")
