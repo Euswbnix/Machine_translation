@@ -25,7 +25,12 @@ training:
   fp16: true
   seed: 42
   save_interval: 5000
-  eval_interval: 20000       # was 2000; eval takes ~7min vs ~30s training per interval
+  # Adaptive eval interval: starts at eval_interval (max), shrinks to
+  # eval_interval_min as loss drops from eval_loss_high to eval_loss_low.
+  eval_interval: 20000       # max interval (used when loss >= eval_loss_high)
+  eval_interval_min: 2000    # min interval (used when loss <= eval_loss_low)
+  eval_loss_high: 4.0        # loss above this → max interval
+  eval_loss_low: 3.0         # loss below this → min interval
   log_interval: 100
   patience: 10             # early stopping patience (eval intervals)
   early_stopping: true     # set false to disable entirely

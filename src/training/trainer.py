@@ -111,8 +111,18 @@ class Trainer:
         self.accumulate_steps = train_cfg.get("accumulate_steps", 1)
         self.clip_grad_norm = train_cfg.get("clip_grad_norm", 1.0)
         self.save_interval = train_cfg["save_interval"]
-        self.eval_interval = train_cfg["eval_interval"]
         self.log_interval = train_cfg["log_interval"]
+
+        # Adaptive eval interval: starts at eval_interval_max when loss is high,
+        # shrinks to eval_interval_min as loss drops below eval_loss_threshold.
+        self.eval_interval_max = train_cfg.get("eval_interval", 20000)
+        self.eval_interval_min = train_cfg.get("eval_interval_min", 2000)
+        # Loss range for interpolation: when loss >= high, use max interval;
+        # when loss <= low, use min interval; linear interpolation in between.
+        self.eval_loss_high = train_cfg.get("eval_loss_high", 4.0)
+        self.eval_loss_low = train_cfg.get("eval_loss_low", 3.0)
+        self._current_eval_interval = self.eval_interval_max
+        self._next_eval_step = 0  # recalculated dynamically
         # Early stopping: set patience=0 or early_stopping=false to disable.
         self.patience = train_cfg.get("patience", 10)
         self.early_stopping = train_cfg.get("early_stopping", True) and self.patience > 0
@@ -134,6 +144,30 @@ class Trainer:
         # Graceful interrupt handling
         self._interrupted = False
         self._main_pid = os.getpid()
+
+    def _update_eval_interval(self, current_loss: float):
+        """Adjust eval interval based on current training loss.
+
+        High loss (>= eval_loss_high) → eval_interval_max (save time)
+        Low loss  (<= eval_loss_low)  → eval_interval_min (track closely)
+        In between                    → linear interpolation
+        """
+        if current_loss >= self.eval_loss_high:
+            t = 0.0
+        elif current_loss <= self.eval_loss_low:
+            t = 1.0
+        else:
+            t = (self.eval_loss_high - current_loss) / (self.eval_loss_high - self.eval_loss_low)
+
+        new_interval = int(
+            self.eval_interval_max + t * (self.eval_interval_min - self.eval_interval_max)
+        )
+        # Round to nearest log_interval for clean alignment
+        new_interval = max(self.eval_interval_min, (new_interval // self.log_interval) * self.log_interval)
+
+        if new_interval != self._current_eval_interval:
+            print(f"  Eval interval adjusted: {self._current_eval_interval} → {new_interval} (loss={current_loss:.3f})")
+            self._current_eval_interval = new_interval
 
     def _handle_signal(self, signum, frame):
         """Handle SIGINT/SIGTERM: set flag to save and exit after current step."""
@@ -202,19 +236,24 @@ class Trainer:
                         self.history["train_loss"].append((self.global_step, avg_loss))
                         self.history["lr"].append((self.global_step, lr))
 
+                        # Update adaptive eval interval based on current loss
+                        self._update_eval_interval(avg_loss)
+
                         total_loss = 0.0
                         total_tokens = 0
                         start_time = time.time()
 
-                    if self.global_step % self.eval_interval == 0 and self.global_step > 0:
+                    if self.global_step >= self._next_eval_step and self.global_step > 0:
                         bleu = self._evaluate()
+                        # Schedule next eval based on current adaptive interval
+                        self._next_eval_step = self.global_step + self._current_eval_interval
                         if bleu is None:
                             # Eval was aborted by Ctrl+C; let the next loop
                             # iteration see self._interrupted and save.
                             print(f"Step {self.global_step:>7d} | Eval interrupted, skipping BLEU update")
                             self.model.train()
                             continue
-                        print(f"Step {self.global_step:>7d} | Valid BLEU: {bleu:.2f}")
+                        print(f"Step {self.global_step:>7d} | Valid BLEU: {bleu:.2f} (next eval at {self._next_eval_step})")
                         self.writer.add_scalar("valid/bleu", bleu, self.global_step)
                         self.history["valid_bleu"].append((self.global_step, bleu))
 
