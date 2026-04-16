@@ -123,7 +123,7 @@ class Trainer:
         self.eval_loss_high = train_cfg.get("eval_loss_high", 4.0)
         self.eval_loss_low = train_cfg.get("eval_loss_low", 3.0)
         self._current_eval_interval = self.eval_interval_max
-        self._next_eval_step = 0  # recalculated dynamically
+        self._next_eval_step = self.eval_interval_max  # first eval after warming up
         self._smoothed_loss = None  # EMA of training loss for adaptive eval
         # Early stopping: set patience=0 or early_stopping=false to disable.
         self.patience = train_cfg.get("patience", 10)
