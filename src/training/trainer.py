@@ -425,13 +425,33 @@ class Trainer:
         # Atomic rename: POSIX guarantees this is either fully done or not done.
         tmp_path.replace(path)
 
-    def load_checkpoint(self, path: str):
-        """Load a checkpoint to resume training."""
+    def load_checkpoint(self, path: str, reset_optimizer: bool = False):
+        """Load a checkpoint to resume training.
+
+        Args:
+            path: Path to checkpoint file.
+            reset_optimizer: If True, only load model weights and reset
+                optimizer/scheduler/scaler to fresh state. Useful when
+                LR schedule was changed and Adam momentum is stale.
+        """
         ckpt = torch.load(path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(ckpt["model"])
-        self.optimizer.load_state_dict(ckpt["optimizer"])
-        self.scheduler.load_state_dict(ckpt["scheduler"])
-        self.scaler.load_state_dict(ckpt["scaler"])
+
+        if reset_optimizer:
+            # Keep model weights, but start optimizer fresh.
+            # Reset scheduler step based on global_step and accumulate_steps
+            # so LR doesn't jump to warmup level.
+            self.global_step = ckpt["global_step"]
+            sched_step = self.global_step // self.accumulate_steps
+            self.scheduler._step = sched_step
+            self.optimizer.zero_grad()
+            print(f"  Optimizer/scheduler RESET (scheduler step set to {sched_step}, "
+                  f"LR = {self.scheduler.current_lr:.2e})")
+        else:
+            self.optimizer.load_state_dict(ckpt["optimizer"])
+            self.scheduler.load_state_dict(ckpt["scheduler"])
+            self.scaler.load_state_dict(ckpt["scaler"])
+
         self.global_step = ckpt["global_step"]
         self.best_bleu = ckpt.get("best_bleu", 0.0)
 

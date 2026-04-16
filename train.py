@@ -24,6 +24,8 @@ def main():
     parser = argparse.ArgumentParser(description="Train Transformer for machine translation")
     parser.add_argument("--config", type=str, default="configs/base.yaml", help="Config file path")
     parser.add_argument("--resume", type=str, default=None, help="Checkpoint path to resume from")
+    parser.add_argument("--reset-optimizer", action="store_true",
+                        help="Reset optimizer/scheduler state on resume (keeps model weights)")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -40,7 +42,7 @@ def main():
     trainer = Trainer(config, device)
 
     if args.resume:
-        trainer.load_checkpoint(args.resume)
+        trainer.load_checkpoint(args.resume, reset_optimizer=args.reset_optimizer)
 
     trainer.train()
 
