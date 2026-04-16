@@ -418,7 +418,11 @@ class Trainer:
         self.scaler.load_state_dict(ckpt["scaler"])
         self.global_step = ckpt["global_step"]
         self.best_bleu = ckpt.get("best_bleu", 0.0)
-        print(f"Resumed from step {self.global_step} (best BLEU: {self.best_bleu:.2f})")
+
+        # Schedule next eval relative to resumed step so we don't
+        # trigger an immediate eval on the first iteration.
+        self._next_eval_step = self.global_step + self._current_eval_interval
+        print(f"Resumed from step {self.global_step} (best BLEU: {self.best_bleu:.2f}, next eval at {self._next_eval_step})")
 
     def _cleanup_checkpoints(self):
         """Keep only the last N step checkpoints."""
