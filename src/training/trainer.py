@@ -123,6 +123,7 @@ class Trainer:
         self.eval_loss_low = train_cfg.get("eval_loss_low", 3.0)
         self._current_eval_interval = self.eval_interval_max
         self._next_eval_step = 0  # recalculated dynamically
+        self._smoothed_loss = None  # EMA of training loss for adaptive eval
         # Early stopping: set patience=0 or early_stopping=false to disable.
         self.patience = train_cfg.get("patience", 10)
         self.early_stopping = train_cfg.get("early_stopping", True) and self.patience > 0
@@ -146,27 +147,37 @@ class Trainer:
         self._main_pid = os.getpid()
 
     def _update_eval_interval(self, current_loss: float):
-        """Adjust eval interval based on current training loss.
+        """Adjust eval interval based on smoothed training loss (EMA).
 
-        High loss (>= eval_loss_high) → eval_interval_max (save time)
-        Low loss  (<= eval_loss_low)  → eval_interval_min (track closely)
-        In between                    → linear interpolation
+        Uses exponential moving average to avoid reacting to single-batch
+        noise. Only logs when the interval actually changes by a meaningful
+        amount (>= 10%).
         """
-        if current_loss >= self.eval_loss_high:
+        # Update EMA (alpha=0.1 → roughly smooths over last ~10 readings)
+        if self._smoothed_loss is None:
+            self._smoothed_loss = current_loss
+        else:
+            self._smoothed_loss = 0.9 * self._smoothed_loss + 0.1 * current_loss
+
+        loss = self._smoothed_loss
+        if loss >= self.eval_loss_high:
             t = 0.0
-        elif current_loss <= self.eval_loss_low:
+        elif loss <= self.eval_loss_low:
             t = 1.0
         else:
-            t = (self.eval_loss_high - current_loss) / (self.eval_loss_high - self.eval_loss_low)
+            t = (self.eval_loss_high - loss) / (self.eval_loss_high - self.eval_loss_low)
 
         new_interval = int(
             self.eval_interval_max + t * (self.eval_interval_min - self.eval_interval_max)
         )
-        # Round to nearest log_interval for clean alignment
-        new_interval = max(self.eval_interval_min, (new_interval // self.log_interval) * self.log_interval)
+        # Round to nearest 1000 for clean numbers
+        new_interval = max(self.eval_interval_min, round(new_interval / 1000) * 1000)
 
+        # Only log if interval changed by >= 10% (avoid spamming on noise)
         if new_interval != self._current_eval_interval:
-            print(f"  Eval interval adjusted: {self._current_eval_interval} → {new_interval} (loss={current_loss:.3f})")
+            change_pct = abs(new_interval - self._current_eval_interval) / self._current_eval_interval
+            if change_pct >= 0.1:
+                print(f"  Eval interval: {self._current_eval_interval} → {new_interval} (smoothed_loss={loss:.3f})")
             self._current_eval_interval = new_interval
 
     def _handle_signal(self, signum, frame):
