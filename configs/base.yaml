@@ -19,7 +19,7 @@ training:
   max_steps: 800000        # ~200K optimizer updates, ~8 epochs on 25M pairs
   warmup_steps: 4000
   lr: 0.0007               # peak learning rate
-  lr_scale: 2.0            # multiplier on Noam schedule (1.0=paper, 2.0=faster convergence)
+  lr_scale: 1.0            # back to paper default; 2.0 caused divergence around loss 4.0
   label_smoothing: 0.1
   clip_grad_norm: 1.0
   fp16: true
