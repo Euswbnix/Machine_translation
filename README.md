@@ -209,6 +209,12 @@ The Base config was trained to ~700K steps on cleaned WMT17 zh-en (19M pairs).
 It **failed to converge in any useful sense** — loss plateaued at ~4.22 and
 valid BLEU never crossed 1.0. Kept here as a cautionary baseline.
 
+![Base training curves](training_curves.png)
+
+The loss curve is almost flat from ~560K onwards and BLEU oscillates
+around 0.7 without an upward trend, even as the LR keeps decaying. Classic
+signature of a model that has hit its capacity/data ceiling.
+
 ### Training trajectory
 
 | Step    | Train Loss | Valid BLEU | LR       |
