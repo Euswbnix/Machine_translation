@@ -423,6 +423,8 @@ class Trainer:
                 "global_step": self.global_step,
                 "best_bleu": self.best_bleu,
                 "config": self.config,
+                # Persist history so training curves span across resumes.
+                "history": self.history,
             },
             tmp_path,
         )
@@ -458,6 +460,18 @@ class Trainer:
 
         self.global_step = ckpt["global_step"]
         self.best_bleu = ckpt.get("best_bleu", 0.0)
+
+        # Restore history so training curves span resumes. Older checkpoints
+        # without this field just start fresh (we lose the pre-resume curve
+        # but training itself is unaffected).
+        saved_history = ckpt.get("history")
+        if saved_history and all(k in saved_history for k in ("train_loss", "valid_bleu", "lr")):
+            self.history = saved_history
+            n_loss = len(self.history["train_loss"])
+            n_bleu = len(self.history["valid_bleu"])
+            print(f"  Restored history: {n_loss} loss points, {n_bleu} BLEU points")
+        else:
+            print("  No history in checkpoint — plot will cover only this session.")
 
         # Schedule next eval relative to resumed step so we don't
         # trigger an immediate eval on the first iteration.
