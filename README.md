@@ -198,12 +198,78 @@ python translate.py --checkpoint checkpoints/best.pt
 
 ## Results
 
-*To be filled in after training.*
-
 | Config | Valid BLEU | Test BLEU | Training time |
 |--------|-----------|-----------|---------------|
-| Base   | TBD       | TBD       | TBD           |
+| Base   | 0.77 (plateau) | — | ~4 days on 5090 |
 | Big    | TBD       | TBD       | TBD           |
+
+## Failure Case: Base on WMT17 zh-en
+
+The Base config was trained to ~700K steps on cleaned WMT17 zh-en (19M pairs).
+It **failed to converge in any useful sense** — loss plateaued at ~4.22 and
+valid BLEU never crossed 1.0. Kept here as a cautionary baseline.
+
+### Training trajectory
+
+| Step    | Train Loss | Valid BLEU | LR       |
+|---------|------------|------------|----------|
+| 28K     | 4.63       | —          | 5.28e-4  |
+| 160K    | 4.33       | 0.46       | 2.23e-4  |
+| 305K    | 4.27       | 0.71       | 1.60e-4  |
+| 385K    | 4.25       | 0.54       | 1.42e-4  |
+| 700K    | 4.22       | 0.77 (best)| 1.06e-4  |
+
+Loss dropped 0.08 over the last 500K steps — essentially flat. BLEU oscillated
+in the 0.5-0.8 range without trend. Sample translations remained unconditioned
+boilerplate (e.g. *"I'd like to take this opportunity to congratulate you..."*
+for arbitrary Chinese inputs), showing the language-model prior dominated the
+source signal.
+
+### What went wrong — and what didn't
+
+What we ruled out via diagnostics (`scripts/diagnose_attention.py`):
+
+- **Not a code bug.** Encoder outputs differ by source (L2 distances 16-23);
+  decoder logits differ by source (L2 distances up to 65). Cross-attention is
+  wired correctly and passing signal.
+- **Not a tokenization bug.** SentencePiece alphabet covers 2814 chars at
+  99.95% coverage. No `<unk>` on held-out Chinese inputs.
+- **Not data misalignment.** Spot-checked parallel corpus, zh/en lines aligned.
+
+What actually happened:
+
+1. **zh-en is hard.** Unrelated language pair (no cognates, different script,
+   large word-order divergence). Shared BPE vocab degrades to "two disjoint
+   halves" instead of the aligned subword space en-de benefits from. Published
+   Base Transformer results on WMT zh-en top out around BLEU 18-22 even with
+   clean data and careful tuning — not BLEU 27+ like en-de.
+2. **Data quality.** Even after cleaning (dedupe >50×, length-ratio filter),
+   the corpus still contains substantial news-agency boilerplate and
+   UN-style generic phrasing. These high-frequency patterns become attractors
+   that the language-model prior can exploit without ever learning to condition
+   on source.
+3. **Model capacity.** Base (65M params) is likely too small for this task.
+   The plateau at loss 4.22 is consistent with the model memorizing the
+   marginal English distribution and failing to model the conditional.
+4. **LR decay too aggressive for a slow task.** Noam schedule with `lr_scale=1`
+   has LR at ~1.06e-4 by step 700K — too low to escape the plateau even if
+   the model had capacity left.
+
+### Lessons
+
+- For a "from scratch on harder language pair" project, prefer **Big from the
+  start** — don't sink compute into Base hoping it'll converge.
+- Sample translations are a better early-warning signal than BLEU or loss.
+  A loss of 4.2 with mode-collapsed outputs is qualitatively different from
+  a loss of 4.2 with source-conditioned outputs, but both look identical on
+  the loss curve.
+- If building a new tokenizer or filter, **delete every downstream cache file
+  by hand**. A stale `valid.*.cached_*.npz` encoded under the old vocab will
+  silently poison eval without any error message.
+- `loginctl enable-linger $USER` on JupyterHub hosts — without it, tmux and
+  long-running jobs die when the browser session closes.
+
+Moving to Big for the actual run.
 
 ## Hardware Used
 
