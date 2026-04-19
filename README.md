@@ -35,6 +35,11 @@ on WMT14 en-de, then produce a final report.
 
 ```
 Machine_translation/
+├── assets/                    # README images (training curves, diagrams)
+├── checkpoints/               # Per-run output dirs (git-ignored)
+│   ├── base_zhen/             # zh-en Base ckpts (historical)
+│   ├── big_zhen/              # zh-en Big ckpts (historical)
+│   └── base_enfr/             # en-fr Base ckpts (current)
 ├── configs/
 │   ├── base.yaml              # Transformer Base (65M params) — zh-en (historical)
 │   ├── big.yaml               # Transformer Big (213M params) — zh-en (historical)
@@ -135,12 +140,13 @@ python train.py --config configs/base_en_fr.yaml
 
 **Resume from checkpoint:**
 ```bash
-python train.py --config configs/base.yaml --resume checkpoints/interrupted_step_12345.pt
+python train.py --config configs/base_en_fr.yaml \
+    --resume checkpoints/base_enfr/interrupted_step_12345.pt
 ```
 
 **Monitor with TensorBoard:**
 ```bash
-tensorboard --logdir checkpoints/logs
+tensorboard --logdir checkpoints/base_enfr/logs
 ```
 
 ### Running training in tmux (recommended for long runs)
@@ -202,7 +208,7 @@ watch -n 2 nvidia-smi
 ### 5. Checkpoint averaging (recommended)
 ```bash
 # Average the last 5 saved step_*.pt into averaged.pt
-python scripts/average_checkpoints.py --ckpt-dir checkpoints_enfr --n 5
+python scripts/average_checkpoints.py --ckpt-dir checkpoints/base_enfr --n 5
 ```
 Per Vaswani et al., averaging the tail of training smooths SGD noise in the
 convergence band. Empirically worth **+0.3–0.5 BLEU** on top of the best
@@ -211,7 +217,7 @@ single checkpoint.
 ### 6. Evaluate BLEU on a test set
 ```bash
 python scripts/eval_bleu.py \
-    --ckpt checkpoints_enfr/averaged.pt \
+    --ckpt checkpoints/base_enfr/averaged.pt \
     --config configs/base_en_fr.yaml \
     --src data/test.en --ref data/test.fr \
     --out outputs/test.averaged.fr
@@ -221,12 +227,12 @@ python scripts/eval_bleu.py \
 ```bash
 # Interactive REPL — type sentences, get translations, Ctrl+D to quit
 python scripts/interactive_translate.py \
-    --ckpt checkpoints_enfr/averaged.pt \
+    --ckpt checkpoints/base_enfr/averaged.pt \
     --config configs/base_en_fr.yaml
 
 # Batch — one sentence per line
 python scripts/interactive_translate.py \
-    --ckpt checkpoints_enfr/averaged.pt \
+    --ckpt checkpoints/base_enfr/averaged.pt \
     --config configs/base_en_fr.yaml \
     --input my_en_sentences.txt \
     --output my_fr_translations.txt
@@ -252,13 +258,13 @@ python scripts/interactive_translate.py \
 
 ## Training Output
 
-- `checkpoints/best.pt` — Best model (by validation BLEU)
-- `checkpoints/final.pt` — Final step checkpoint
-- `checkpoints/step_*.pt` — Periodic checkpoints (keeps last 5)
-- `checkpoints/interrupted_step_*.pt` — Saved on Ctrl+C / SIGTERM
-- `checkpoints/emergency.pt` — Rolling save every 500 steps (UPS / power-off fallback)
-- `checkpoints/training_report.txt` — Human-readable training summary
-- `checkpoints/logs/` — TensorBoard logs
+- `checkpoints/base_enfr/best.pt` — Best model (by validation BLEU)
+- `checkpoints/base_enfr/final.pt` — Final step checkpoint
+- `checkpoints/base_enfr/step_*.pt` — Periodic checkpoints (keeps last 5)
+- `checkpoints/base_enfr/interrupted_step_*.pt` — Saved on Ctrl+C / SIGTERM
+- `checkpoints/base_enfr/emergency.pt` — Rolling save every 500 steps (UPS / power-off fallback)
+- `checkpoints/base_enfr/training_report.txt` — Human-readable training summary
+- `checkpoints/base_enfr/logs/` — TensorBoard logs
 
 ## Results
 
@@ -281,7 +287,7 @@ Trained Transformer Base (~60M params) on 10M pairs of WMT14 en-fr for 100K
 steps on a single RTX 5090. **Converged cleanly to BLEU 30.00 on newstest2013
 and 34.69 on newstest2014** after checkpoint averaging.
 
-![en-fr training curves](training_curves_enfr.png)
+![en-fr training curves](assets/training_curves_base_enfr.png)
 
 ### Final numbers
 
@@ -434,9 +440,9 @@ python scripts/train_tokenizer.py \
     --inputs data/train.clean.en data/train.clean.fr \
     --model-prefix data/spm_enfr --vocab-size 32000
 python train.py --config configs/base_en_fr.yaml
-python scripts/average_checkpoints.py --ckpt-dir checkpoints_enfr --n 5
+python scripts/average_checkpoints.py --ckpt-dir checkpoints/base_enfr --n 5
 python scripts/eval_bleu.py \
-    --ckpt checkpoints_enfr/averaged.pt \
+    --ckpt checkpoints/base_enfr/averaged.pt \
     --config configs/base_en_fr.yaml \
     --src data/test.en --ref data/test.fr
 ```
@@ -460,7 +466,7 @@ The Base config was trained to ~700K steps on cleaned WMT17 zh-en (19M pairs).
 It **failed to converge in any useful sense** — loss plateaued at ~4.22 and
 valid BLEU never crossed 1.0. Kept here as a cautionary baseline.
 
-![Base training curves](training_curves.png)
+![Base training curves](assets/training_curves_base_zhen.png)
 
 The loss curve is almost flat from ~560K onwards and BLEU oscillates
 around 0.7 without an upward trend, even as the LR keeps decaying. Classic
@@ -534,7 +540,7 @@ break the mode-collapse ceiling. It didn't. Across multiple training attempts
 with increasingly careful tuning, Big on WMT17 zh-en **also never produced
 source-conditioned translations**.
 
-![Big training curves](training_curves_big.png)
+![Big training curves](assets/training_curves_big_zhen.png)
 
 The loss curve (top-left) shows the same flattening pattern as Base, just at
 a lower absolute level (~4.65 vs ~4.22). BLEU (top-right) rises from 0.12 to

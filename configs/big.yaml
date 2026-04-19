@@ -75,5 +75,5 @@ inference:
   max_decode_len: 256
 
 checkpoint:
-  dir: checkpoints_big
+  dir: checkpoints/big_zhen
   keep_last: 5

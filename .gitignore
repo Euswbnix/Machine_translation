@@ -1,11 +1,19 @@
 # Training data (too large for git)
 data/*.zh
 data/*.en
-data/spm.model
-data/spm.vocab
+data/*.fr
+data/*.de
+data/spm*.model
+data/spm*.vocab
 
-# Checkpoints
+# Checkpoints — unified layout: checkpoints/<run_name>/
 checkpoints/
+# Legacy per-run dirs (historical, left on server)
+checkpoints_big/
+checkpoints_enfr/
+
+# Outputs
+outputs/
 
 # Python
 __pycache__/
@@ -15,3 +23,6 @@ __pycache__/
 # Logs
 *.log
 runs/
+
+# macOS
+.DS_Store
