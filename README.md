@@ -343,6 +343,57 @@ Observations:
   French valid sentences; roughly a 0.5 BLEU ceiling to reclaim in the next
   iteration by using `character_coverage=1.0`.
 
+### Interactive samples (out-of-domain robustness)
+
+Feeding the averaged checkpoint with sentences the model never saw during
+training — both news-style and conversational — shows the domain signature
+clearly:
+
+**News-style (in-domain) — essentially professional quality:**
+
+```
+SRC: The Prime Minister announced new sanctions against Russia.
+HYP: Le Premier ministre a annoncé de nouvelles sanctions contre la Russie.
+
+SRC: The European Central Bank raised interest rates by 0.25 percentage points.
+HYP: La Banque centrale européenne a relevé les taux d'intérêt de 0,25 point
+     de pourcentage.
+```
+
+The second example alone gets ~10 fine-grained things right: adjective
+ordering ("Banque centrale" not "centrale Banque"), feminine agreement
+("européenne"), finance-register verb ("a relevé" not "a augmenté"), the
+fixed collocation "taux d'intérêt", European decimal notation ("0,25" with
+a comma), and singular "point de pourcentage" (French singularizes units
+when the coefficient is between 0 and 2 — a rule English doesn't have).
+
+**Conversational / netspeak (out-of-distribution) — fails as expected:**
+
+```
+SRC: hello, how are u
+HYP: Bonjour, comment sont-ils u
+
+SRC: hello, how r u
+HYP: Bonjour, comment r u
+```
+
+Two failure modes visible here, both caused by WMT14 being a news + parliament
+corpus:
+
+1. **Unknown tokens pass through**: `"u"` and `"r"` never appear as
+   abbreviations in the training data, so SPM tokenizes them as bare letters
+   and the model copies them verbatim.
+2. **Wrong sense disambiguation on "are"**: `"how are you"` is rare in news
+   text, so the model defaults to the plural/3rd-person sense of "are" that
+   dominates parliamentary language (`"how are these policies working"` →
+   `"comment sont ces politiques"`), producing `"comment sont-ils"`
+   ("how are they") instead of the correct idiom `"comment allez-vous"`.
+
+This is a **domain coverage** issue, not a model-capacity issue. Fixing it
+requires either mixing in conversational corpora (OpenSubtitles, TED talks) or
+adding domain tags at training time — both on the roadmap after Base hits its
+ceiling on pure WMT data.
+
 ### Why this worked (contrast with zh-en)
 
 Same codebase, same Transformer, same training loop — different outcome.
