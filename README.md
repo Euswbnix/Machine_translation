@@ -230,6 +230,7 @@ in the 0.5-0.8 range without trend. Sample translations remained unconditioned
 boilerplate (e.g. *"I'd like to take this opportunity to congratulate you..."*
 for arbitrary Chinese inputs), showing the language-model prior dominated the
 source signal.
+Due to time and resource constraints, we had to halt further training.
 
 ### What went wrong — and what didn't
 
