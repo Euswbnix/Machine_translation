@@ -131,9 +131,9 @@ class Trainer:
         self.clip_grad_norm = train_cfg.get("clip_grad_norm", 1.0)
         # Loss-spike guard: if a step's loss is > ema_loss * spike_ratio, skip its
         # optimizer update so the toxic gradient doesn't corrupt weights. Set to 0 to disable.
-        self.loss_spike_ratio = train_cfg.get("loss_spike_ratio", 1.8)
+        self.loss_spike_ratio = train_cfg.get("loss_spike_ratio", 1.3)
+        self._loss_ema_alpha = train_cfg.get("loss_ema_alpha", 0.005)  # window ~200 steps
         self._loss_ema = None  # exponential moving avg of recent loss, for spike detection
-        self._loss_ema_alpha = 0.02  # effective window ~50 steps
         self._skip_count = 0
         self._current_batch_spike = False  # persists across micro-batches within one effective batch
         self.save_interval = train_cfg["save_interval"]

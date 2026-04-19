@@ -1,5 +1,6 @@
 # Transformer Big Configuration
-# ~213M parameters, higher BLEU ceiling but ~2-3x slower training
+# ~213M parameters. Restarted from scratch after repeated blowups on resumed runs
+# from step_45000.pt — lessons learned are baked into this config.
 
 model:
   d_model: 1024
@@ -16,26 +17,44 @@ training:
   batch_size: 8192          # tokens per batch (Big is memory-heavy)
   max_sentences: 64
   accumulate_steps: 4       # effective batch = 32K
-  max_steps: 600000
-  warmup_steps: 4000
+
+  # Schedule: 400K total, 8K warmup. 4K warmup was too short for Big — early
+  # gradient magnitudes caused weight trajectories that destabilized later.
+  max_steps: 400000
+  warmup_steps: 8000
   lr: 0.0007
-  lr_scale: 1.2             # 1.0 was too conservative — combined with clip it stalled learning
-  min_lr: 0.0
+  lr_scale: 1.5             # peak LR ~7e-4 (safe with 8K warmup)
+  min_lr: 1.0e-5            # floor — prevents LR decaying to ~0 in late training
+
   label_smoothing: 0.1
-  clip_grad_norm: 1.0       # back to 1.0 — spike guard now handles the toxic-batch defense directly
+  clip_grad_norm: 1.0
+
+  # Precision: bf16 only. fp16 blowups were the first hypothesis but the real
+  # instability was data-driven; bf16 still helps by removing one failure axis.
   fp16: false
-  bf16: true                # bf16 alone didn't fix blowups — they were data-driven, not overflow
-  seed: 43                  # was 42; changes shuffle order to escape the deterministic bad-batch trajectory
+  bf16: true
+
+  seed: 43
+
   save_interval: 5000
-  eval_interval: 50000
+  eval_interval: 10000      # dense eval on fresh run — early trend detection
   eval_interval_min: 2000
   eval_loss_high: 4.0
   eval_loss_low: 3.0
   log_interval: 100
+
   patience: 10
   early_stopping: true
-  min_steps_before_early_stop: 400000  # don't early-stop before this global_step (avoids stopping during mode-collapse phase)
-  emergency_save_interval: 500  # rolling save for UPS/power-off safety (0 to disable)
+  min_steps_before_early_stop: 100000
+  emergency_save_interval: 500
+
+  # Loss-spike guard (tightened from the failed run)
+  # Previous 1.8 threshold missed the actual failure mode: staircase drift
+  # of ~6-10% per step that compounds into full blowup over ~100 steps.
+  # 1.3 catches gradual drift; EMA alpha 0.005 (window ~200 steps) prevents
+  # the EMA from being dragged up along with the drift.
+  loss_spike_ratio: 1.3
+  loss_ema_alpha: 0.005
 
 data:
   src_lang: zh
@@ -56,5 +75,5 @@ inference:
   max_decode_len: 256
 
 checkpoint:
-  dir: checkpoints_big      # separate checkpoint dir
+  dir: checkpoints_big
   keep_last: 5
