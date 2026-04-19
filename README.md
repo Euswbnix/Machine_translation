@@ -200,8 +200,12 @@ python translate.py --checkpoint checkpoints/best.pt
 
 | Config | Valid BLEU | Test BLEU | Training time |
 |--------|-----------|-----------|---------------|
-| Base   | 0.77 (plateau) | — | ~1.5 days on 5090 |
-| Big    | TBD       | TBD       | TBD           |
+| Base (WMT17 zh-en) | 0.77 (plateau) | — | ~1.5 days on 5090 |
+| Big (WMT17 zh-en)  | 0.47 (plateau) | — | ~1 day on 5090 (halted) |
+
+Both WMT17 zh-en runs failed to produce source-conditioned translations.
+The project is pivoting to **WMT en-fr Base** as a pipeline validation
+(Section *Pivot* below).
 
 ## Failure Case: Base on WMT17 zh-en
 
@@ -276,7 +280,103 @@ What actually happened:
 - `loginctl enable-linger $USER` on JupyterHub hosts — without it, tmux and
   long-running jobs die when the browser session closes.
 
-Moving to Big for the actual run.
+## Failure Case: Big on WMT17 zh-en
+
+After Base failed, we moved to Big (213M params) hoping extra capacity would
+break the mode-collapse ceiling. It didn't. Across multiple training attempts
+with increasingly careful tuning, Big on WMT17 zh-en **also never produced
+source-conditioned translations**.
+
+![Big training curves](training_curves_big.png)
+
+The loss curve (top-left) shows the same flattening pattern as Base, just at
+a lower absolute level (~4.65 vs ~4.22). BLEU (top-right) rises from 0.12 to
+0.17 over 30K steps — a change that's statistically real but semantically
+meaningless: sample translations at the "best" checkpoint are still fluent
+English with zero relationship to the Chinese source.
+
+### Training attempts summary
+
+| Attempt | Precision | lr_scale | warmup | Spike guard | Best BLEU | Outcome |
+|---------|-----------|----------|--------|-------------|-----------|---------|
+| v1 | FP16 | 1.5 | 4K | — | 0.31 @ 32K | Blew up at step 46400 (loss 4.0 → 4.8) |
+| v2 (seed=42 resume) | FP16 | 1.5 | 4K | — | 0.47 @ 69K | Blew up at step 47800, loss climbed to 4.8 and stayed |
+| v3 (BF16 switch) | BF16 | 1.5 | 4K | — | — | **Identical blowup** — numerical precision wasn't the issue |
+| v4 (seed=43, lr=1.0, clip=0.5, guard=1.8) | BF16 | 1.0 | 4K | ratio 1.8 | — | Stalled at loss 4.8 (clip too tight, learning suppressed) |
+| v5 (clip=1.0, lr=1.2, guard=1.8) | BF16 | 1.2 | 4K | ratio 1.8 | 0.47 @ 69K | Blew up at step 83800, guard threshold too loose to catch it |
+| v6 (from scratch, warmup=8K, guard=1.3, EMA window 200) | BF16 | 1.5 | 8K | ratio 1.3 | 0.17 @ 85K | No blowups, but **even slower than v5**. Still mode collapse. |
+
+Across ~6 days of compute, best Big BLEU was 0.47 — **worse than the failed
+Base** (0.77), and still within pure mode-collapse territory. Sample
+translations at Big v6 step 85K:
+
+```
+SRC: 加利福尼亚州水务工程的新问题
+REF: New Questions Over California Water Project
+HYP: I'm not sure what you're doing.
+
+SRC: 伊斯兰国武装分子控制着伊拉克和叙利亚的部分领土...
+REF: Its militants control parts of Iraq and Syria...
+HYP: In addition, the Government of the Democratic Republic of the Congo,
+     in collaboration with the Government of the Sudan and the United Nations
+     Development Programme (UNDP) and the United Nations Children's Fund (UNICEF)...
+```
+
+The HYP is fluent English with no relationship to the SRC — a pure
+unconditional language model with topic-triggered boilerplate attractors
+(e.g. "refugees" in source → UN-agency soup in output).
+
+### The deeper diagnosis
+
+The two failures together constitute strong evidence that **vanilla Transformer
+trained from scratch on WMT17 zh-en cannot escape mode collapse within
+reasonable compute** — regardless of model size (65M or 213M), precision
+(FP16 or BF16), or optimization tuning.
+
+The root cause is a combination factors that we cannot fix by tuning alone:
+
+1. **The LM shortcut is too tempting.** Cross-entropy + label smoothing on a
+   32K-vocab target makes "model the English distribution unconditionally"
+   a local minimum at loss ~4.8. The gradient signal from source (via
+   cross-attention) is too weak, relative to target-side signal, for the model
+   to prefer the harder "condition on source" solution.
+2. **Shared BPE hurts, doesn't help.** For en-de the shared subword space
+   aligns cognates and function words; for zh-en, Chinese characters and
+   English words are disjoint token sets, so "shared embeddings" means
+   "two disjoint halves of the embedding matrix that never interact".
+3. **WMT zh-en has too many high-frequency attractors.** News-agency and
+   UN-style boilerplate appears thousands of times in slight variations.
+   Once the model finds the attractor, no amount of training drags it out.
+4. **Published Big zh-en numbers are misleading.** The BLEU 24+ results in
+   papers rely on back-translation, ensemble decoding, or curated data
+   (not raw WMT). Without those tricks, from-scratch Big on WMT zh-en
+   tops out in BLEU 15-20 range — and even that requires specific tuning
+   we weren't able to find.
+
+### What we tried that didn't work
+
+- Longer warmup (4K → 8K): prevents blowups, doesn't break mode collapse
+- Tighter gradient clip (1.0 → 0.5): stalls learning entirely
+- Tighter spike guard (ratio 1.8 → 1.3, EMA window 50 → 200): catches
+  blowups cleanly but doesn't create conditioning signal
+- Switch to BF16: eliminates one failure axis (fp16 overflow) but not the
+  underlying dynamics
+- Seed change: escapes one deterministic "toxic batch" trajectory, model
+  finds equivalent problems elsewhere
+
+### Pivot
+
+Rather than keep throwing compute at zh-en, we're switching to:
+
+1. **WMT14 en-fr Base** — a known-converging language pair, with the same
+   codebase. If en-fr Base hits its expected BLEU 35+, the code is validated
+   and the zh-en failure is conclusively a task-difficulty problem, not a
+   bug.
+2. **Then, if en-fr Base succeeds**, a second zh-en attempt with a cleaner,
+   smaller dataset (IWSLT + News Commentary, ~550K pairs vs WMT's 19M)
+   where mode collapse is less likely to be the dominant dynamic.
+
+See `configs/base_en_fr.yaml` and the en-fr results section below.
 
 ## Hardware Used
 
