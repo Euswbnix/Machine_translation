@@ -19,13 +19,13 @@ training:
   max_steps: 600000
   warmup_steps: 4000
   lr: 0.0007
-  lr_scale: 1.5
+  lr_scale: 1.0             # was 1.5; reduced to dampen damage from large gradients
   min_lr: 0.0
   label_smoothing: 0.1
-  clip_grad_norm: 1.0
+  clip_grad_norm: 0.5       # was 1.0; tighter clip to block gradient spikes from "toxic" batches
   fp16: false
-  bf16: true                # Big + fp16 is unstable (loss blowups ~every 2-10K steps); bf16 has fp32 dynamic range
-  seed: 42
+  bf16: true                # bf16 alone didn't fix blowups — they were data-driven, not overflow
+  seed: 43                  # was 42; changes shuffle order to escape the deterministic bad-batch trajectory
   save_interval: 5000
   eval_interval: 50000
   eval_interval_min: 2000

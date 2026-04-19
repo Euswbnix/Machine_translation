@@ -129,6 +129,13 @@ class Trainer:
         self.max_steps = train_cfg["max_steps"]
         self.accumulate_steps = train_cfg.get("accumulate_steps", 1)
         self.clip_grad_norm = train_cfg.get("clip_grad_norm", 1.0)
+        # Loss-spike guard: if a step's loss is > ema_loss * spike_ratio, skip its
+        # optimizer update so the toxic gradient doesn't corrupt weights. Set to 0 to disable.
+        self.loss_spike_ratio = train_cfg.get("loss_spike_ratio", 1.8)
+        self._loss_ema = None  # exponential moving avg of recent loss, for spike detection
+        self._loss_ema_alpha = 0.02  # effective window ~50 steps
+        self._skip_count = 0
+        self._current_batch_spike = False  # persists across micro-batches within one effective batch
         self.save_interval = train_cfg["save_interval"]
         self.log_interval = train_cfg["log_interval"]
 
@@ -364,13 +371,49 @@ class Trainer:
 
         self.global_step += 1
 
+        # Loss-spike guard: detect any toxic micro-batch within the current effective
+        # batch. If ANY micro-batch spikes, the entire accumulated grad is dropped
+        # at the boundary so the toxic gradient doesn't corrupt weights.
+        unscaled_loss = loss.item() * self.accumulate_steps
+        micro_spike = (
+            self.loss_spike_ratio > 0
+            and self._loss_ema is not None
+            and unscaled_loss > self._loss_ema * self.loss_spike_ratio
+        )
+        if micro_spike:
+            self._current_batch_spike = True
+            self._skip_count += 1
+            if self._skip_count <= 20 or self._skip_count % 50 == 0:
+                print(
+                    f"  [spike guard] step {self.global_step}: loss {unscaled_loss:.3f} "
+                    f"> {self.loss_spike_ratio}x EMA {self._loss_ema:.3f}"
+                )
+
         if self.global_step % self.accumulate_steps == 0:
-            self.scaler.unscale_(self.optimizer)
-            nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad_norm)
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-            self.optimizer.zero_grad()
-            self.scheduler.step()
+            if self._current_batch_spike:
+                # Drop the polluted accumulated grads for this effective-batch.
+                # Do not step the optimizer/scheduler, do not update scaler state.
+                self.optimizer.zero_grad()
+            else:
+                self.scaler.unscale_(self.optimizer)
+                nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_grad_norm)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                self.optimizer.zero_grad()
+                self.scheduler.step()
+            # Reset flag for next effective batch
+            self._current_batch_spike = False
+
+        # Update EMA only with non-spike losses so the guard doesn't drift upward
+        # once a spike slips through.
+        if not micro_spike:
+            if self._loss_ema is None:
+                self._loss_ema = unscaled_loss
+            else:
+                self._loss_ema = (
+                    self._loss_ema_alpha * unscaled_loss
+                    + (1 - self._loss_ema_alpha) * self._loss_ema
+                )
 
         n_tokens = (tgt_labels != PAD_ID).sum().item()
         return loss.item() * self.accumulate_steps, n_tokens
