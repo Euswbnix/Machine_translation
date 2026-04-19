@@ -78,8 +78,22 @@ class Trainer:
             min_lr=train_cfg.get("min_lr", 0.0),
         )
 
-        # Mixed precision
-        self.use_fp16 = train_cfg.get("fp16", True) and device.type == "cuda"
+        # Mixed precision: bf16 takes priority over fp16 if both set.
+        # bf16 has ~fp32 dynamic range so it doesn't need loss scaling and
+        # avoids the overflow-style training blowups that hit large models in fp16.
+        self.use_bf16 = train_cfg.get("bf16", False) and device.type == "cuda"
+        self.use_fp16 = (
+            train_cfg.get("fp16", True)
+            and not self.use_bf16
+            and device.type == "cuda"
+        )
+        self.amp_enabled = self.use_fp16 or self.use_bf16
+        self.amp_dtype = (
+            torch.bfloat16 if self.use_bf16
+            else torch.float16 if self.use_fp16
+            else torch.float32
+        )
+        # GradScaler is only needed/meaningful for fp16.
         self.scaler = GradScaler("cuda", enabled=self.use_fp16)
 
         # Data loaders
@@ -338,7 +352,7 @@ class Trainer:
         tgt_input = tgt[:, :-1]
         tgt_labels = tgt[:, 1:]
 
-        with autocast(device_type="cuda", enabled=self.use_fp16):
+        with autocast(device_type="cuda", enabled=self.amp_enabled, dtype=self.amp_dtype):
             logits = self.model(src, tgt_input)
             loss = self.criterion(
                 logits.contiguous().view(-1, logits.size(-1)),
@@ -537,7 +551,8 @@ class Trainer:
         lines.append(f"Max sentences:   {train_cfg['max_sentences']}")
         lines.append(f"Warmup steps:    {train_cfg['warmup_steps']}")
         lines.append(f"Label smoothing: {train_cfg['label_smoothing']}")
-        lines.append(f"FP16:            {train_cfg.get('fp16', False)}")
+        precision = "BF16" if self.use_bf16 else ("FP16" if self.use_fp16 else "FP32")
+        lines.append(f"Precision:       {precision}")
         lines.append(f"Grad clip norm:  {train_cfg.get('clip_grad_norm', 1.0)}")
         lines.append(f"Seed:            {train_cfg['seed']}")
         lines.append("")
