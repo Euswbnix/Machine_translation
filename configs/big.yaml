@@ -37,7 +37,7 @@ training:
   seed: 43
 
   save_interval: 5000
-  eval_interval: 10000      # dense eval on fresh run — early trend detection
+  eval_interval: 30000      # dense eval on fresh run — early trend detection
   eval_interval_min: 2000
   eval_loss_high: 4.0
   eval_loss_low: 3.0
