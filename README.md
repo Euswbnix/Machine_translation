@@ -1,17 +1,31 @@
 # Machine Translation: Transformer from Scratch
 
-A from-scratch PyTorch implementation of the Transformer model (Vaswani et al., 2017) for Chinese-English machine translation, trained on WMT17 parallel corpus.
+A from-scratch PyTorch implementation of the Transformer (Vaswani et al., 2017),
+trained on WMT parallel corpora without any pretrained weights.
 
-**Goal:** Reach BLEU 25+ on WMT test sets without using pretrained models.
+**Current status:** Transformer Base on WMT14 en-fr — **34.69 BLEU on newstest2014**
+(sacrebleu 13a, checkpoint-averaged). See *Success Case: Base on WMT14 en-fr* below.
+
+**Full trajectory** (documented in this README as success → failure → diagnosis):
+1. ❌ Base on WMT17 zh-en — mode collapse, BLEU 0.77
+2. ❌ Big on WMT17 zh-en — mode collapse, BLEU 0.47
+3. ✅ Base on WMT14 en-fr — BLEU 34.69 (averaged), converged cleanly
+
+Next: push Base en-fr to its ceiling, train Big on en-fr, repeat the pipeline
+on WMT14 en-de, then produce a final report.
 
 ## Features
 
 - Pure PyTorch Transformer implementation (no HuggingFace shortcuts)
 - Shared SentencePiece BPE tokenizer (32K vocab)
 - Token-based dynamic batching for efficient GPU utilization
-- Mixed precision training (FP16)
-- Label-smoothed cross entropy + Noam learning rate schedule
+- Mixed precision: **BF16 (default) or FP16** (autocast + GradScaler)
+- Label-smoothed cross entropy + Noam learning rate schedule with min-LR floor
+- Loss-spike guard (EMA-tracked) that drops poisoned batches without blowing up
+- Adaptive eval interval — sparse early, dense once loss crosses a configured band
 - Beam search decoding with length penalty
+- Checkpoint averaging (Vaswani Base trick, +0.3–0.5 BLEU)
+- Interactive / batch translation CLI
 - Graceful Ctrl+C / SIGTERM interrupt (saves checkpoint and resumes)
 - Atomic checkpoint writes + rolling emergency save (UPS / power-off safe)
 - Automatic training report generation
@@ -22,11 +36,20 @@ A from-scratch PyTorch implementation of the Transformer model (Vaswani et al., 
 ```
 Machine_translation/
 ├── configs/
-│   ├── base.yaml              # Transformer Base (65M params)
-│   └── big.yaml               # Transformer Big (213M params)
+│   ├── base.yaml              # Transformer Base (65M params) — zh-en (historical)
+│   ├── big.yaml               # Transformer Big (213M params) — zh-en (historical)
+│   └── base_en_fr.yaml        # Transformer Base — WMT14 en-fr (current)
 ├── scripts/
-│   ├── download_data.py       # Download WMT17 zh-en data
-│   └── train_tokenizer.py     # Train SentencePiece BPE
+│   ├── download_data.py              # Download WMT17 zh-en data
+│   ├── download_wmt_enfr.py          # Download WMT14 en-fr data
+│   ├── clean_data.py                 # Clean zh-en corpus
+│   ├── clean_data_enfr.py            # Clean en-fr corpus
+│   ├── train_tokenizer.py            # Train SentencePiece BPE
+│   ├── average_checkpoints.py        # Average last N checkpoints (+BLEU)
+│   ├── eval_bleu.py                  # Standalone BLEU evaluation
+│   ├── interactive_translate.py      # REPL / batch translation CLI
+│   ├── quick_translate_check.py      # Sample-translate valid lines (sanity check)
+│   └── diagnose_attention.py         # Diagnose cross-attention collapse
 ├── src/
 │   ├── model/                 # Transformer implementation
 │   │   ├── attention.py       # Multi-Head Attention
@@ -69,28 +92,43 @@ pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu1
 
 ## Usage
 
-### 1. Download WMT17 zh-en data
-```bash
-python scripts/download_data.py --output-dir data
-```
-Downloads ~25M sentence pairs (train / valid / test splits).
+The default flow is **WMT14 en-fr Base**. For zh-en see the historical sections
+below.
 
-### 2. Train BPE tokenizer
+### 1. Download WMT14 en-fr data
+```bash
+# Full corpus is ~40M pairs. 10M is plenty for Base; drop the cap for a full run.
+python scripts/download_wmt_enfr.py --output-dir data --max-train-samples 10000000
+```
+Downloads train / valid (newstest2013) / test (newstest2014).
+
+### 2. Clean the corpus
+```bash
+python scripts/clean_data_enfr.py
+```
+Drops empty, too-short, too-long, non-Latin-script, and high-frequency
+boilerplate pairs. Writes `data/train.clean.en` and `data/train.clean.fr`.
+
+### 3. Train BPE tokenizer
 ```bash
 python scripts/train_tokenizer.py \
-    --inputs data/train.zh data/train.en \
-    --model-prefix data/spm \
+    --inputs data/train.clean.en data/train.clean.fr \
+    --model-prefix data/spm_enfr \
     --vocab-size 32000
 ```
-Produces `data/spm.model` and `data/spm.vocab` (shared zh-en BPE, 32K vocab).
+Produces `data/spm_enfr.model` and `data/spm_enfr.vocab` (shared en-fr BPE,
+32K vocab). Both sides share Latin script so shared BPE is well-behaved
+(unlike zh-en).
 
-### 3. Train the model
+**Tip**: for the next run, add `--character-coverage 1.0` to `train_tokenizer.py`
+(or edit the call in `src/data/tokenizer.py`). The default 0.9995 caused ~4.4%
+of French valid sentences to hit `<unk>` on accented characters (`Israël`,
+`Noël`, etc.), costing ~0.5 BLEU.
+
+### 4. Train the model
 ```bash
-# Transformer Base (~65M params, 1.5-2.5 days on RTX 5090)
-python train.py --config configs/base.yaml
-
-# Transformer Big (~213M params, 3-5 days on RTX 5090)
-python train.py --config configs/big.yaml
+# Transformer Base on en-fr (~60M params, ~2 hours on RTX 5090)
+python train.py --config configs/base_en_fr.yaml
 ```
 
 **Graceful interrupt:** Press `Ctrl+C` once to save a checkpoint and exit cleanly. Press twice to force-quit without saving.
@@ -161,30 +199,56 @@ watch -n 2 nvidia-smi
 
 **Note:** tmux and the graceful-interrupt logic compose naturally. `Ctrl+b d` just detaches; it does NOT send SIGINT. To actually interrupt training cleanly, re-attach first (`tmux attach -t train`), then press `Ctrl+C` inside the session.
 
-### 4. Translate
+### 5. Checkpoint averaging (recommended)
 ```bash
-# From a file
-python translate.py --checkpoint checkpoints/best.pt --input test_input.txt
+# Average the last 5 saved step_*.pt into averaged.pt
+python scripts/average_checkpoints.py --ckpt-dir checkpoints_enfr --n 5
+```
+Per Vaswani et al., averaging the tail of training smooths SGD noise in the
+convergence band. Empirically worth **+0.3–0.5 BLEU** on top of the best
+single checkpoint.
 
-# From stdin
-python translate.py --checkpoint checkpoints/best.pt
+### 6. Evaluate BLEU on a test set
+```bash
+python scripts/eval_bleu.py \
+    --ckpt checkpoints_enfr/averaged.pt \
+    --config configs/base_en_fr.yaml \
+    --src data/test.en --ref data/test.fr \
+    --out outputs/test.averaged.fr
+```
+
+### 7. Translate — interactive or batch
+```bash
+# Interactive REPL — type sentences, get translations, Ctrl+D to quit
+python scripts/interactive_translate.py \
+    --ckpt checkpoints_enfr/averaged.pt \
+    --config configs/base_en_fr.yaml
+
+# Batch — one sentence per line
+python scripts/interactive_translate.py \
+    --ckpt checkpoints_enfr/averaged.pt \
+    --config configs/base_en_fr.yaml \
+    --input my_en_sentences.txt \
+    --output my_fr_translations.txt
 ```
 
 ## Configuration
 
-| Parameter | Base | Big |
-|-----------|------|-----|
-| d_model | 512 | 1024 |
-| n_heads | 8 | 16 |
-| n_layers (enc/dec) | 6 / 6 | 6 / 6 |
-| d_ff | 2048 | 4096 |
-| Dropout | 0.1 | 0.3 |
-| Parameters | ~65M | ~213M |
-| Vocab | 32K (shared BPE) | 32K (shared BPE) |
-| Batch | 32K tokens | 32K tokens |
-| Warmup steps | 4000 | 4000 |
-| Max steps | 300K | 300K |
-| Label smoothing | 0.1 | 0.1 |
+| Parameter | Base (en-fr) | Base (zh-en) | Big (zh-en) |
+|-----------|--------------|--------------|-------------|
+| d_model | 512 | 512 | 1024 |
+| n_heads | 8 | 8 | 16 |
+| n_layers (enc/dec) | 6 / 6 | 6 / 6 | 6 / 6 |
+| d_ff | 2048 | 2048 | 4096 |
+| Dropout | 0.1 | 0.1 | 0.3 |
+| Parameters | ~60M | ~65M | ~213M |
+| Vocab | 32K shared BPE | 32K shared BPE | 32K shared BPE |
+| Batch (effective) | 100K tokens | 100K tokens | 32K tokens |
+| Warmup steps | 4000 | 4000 | 8000 |
+| Max steps | 100K | 800K | 400K |
+| Precision | BF16 | FP16 | BF16 |
+| Label smoothing | 0.1 | 0.1 | 0.1 |
+| Spike guard | ratio 1.3, α 0.005 | — | ratio 1.3, α 0.005 |
 
 ## Training Output
 
@@ -198,14 +262,146 @@ python translate.py --checkpoint checkpoints/best.pt
 
 ## Results
 
-| Config | Valid BLEU | Test BLEU | Training time |
-|--------|-----------|-----------|---------------|
-| Base (WMT17 zh-en) | 0.77 (plateau) | — | ~1.5 days on 5090 |
-| Big (WMT17 zh-en)  | 0.47 (plateau) | — | ~1 day on 5090 (halted) |
+| Config | Valid BLEU | Test BLEU | Training time | Status |
+|--------|-----------|-----------|---------------|--------|
+| **Base (WMT14 en-fr)**       | **30.00** | **34.19** (best.pt)      | 2h 5m on 5090 | ✅ converged |
+| **Base (WMT14 en-fr) avg-5** | —         | **34.69** (averaged.pt)  | +seconds      | ✅ +0.50 from averaging |
+| Base (WMT17 zh-en)           | 0.77 (plateau) | — | ~1.5 days on 5090 | ❌ mode collapse |
+| Big (WMT17 zh-en)            | 0.47 (plateau) | — | ~1 day on 5090 (halted) | ❌ mode collapse |
 
-Both WMT17 zh-en runs failed to produce source-conditioned translations.
-The project is pivoting to **WMT en-fr Base** as a pipeline validation
-(Section *Pivot* below).
+BLEU reported as sacrebleu `13a` (modern detokenized standard). Published
+Vaswani Base on WMT14 en-fr is 38.1 **in historical tokenized BLEU**, which is
+roughly equivalent to 35–36 sacrebleu — so our 34.69 is **~1–1.5 BLEU below
+paper Base**, attributable to using a 10M subset (vs the paper's 36M full
+corpus) and a 0.5 BLEU ceiling from `<unk>` on accented French characters.
+
+## Success Case: Base on WMT14 en-fr
+
+Trained Transformer Base (~60M params) on 10M pairs of WMT14 en-fr for 100K
+steps on a single RTX 5090. **Converged cleanly to BLEU 30.00 on newstest2013
+and 34.69 on newstest2014** after checkpoint averaging.
+
+![en-fr training curves](training_curves_enfr.png)
+
+### Final numbers
+
+| | newstest2013 (valid) | newstest2014 (test) |
+|---|---|---|
+| Best single checkpoint (step 86K) | 30.00 | 34.19 |
+| Averaged (last 5, steps 80K–100K) | — | **34.69** |
+| Averaging gain | — | +0.50 |
+
+### Training trajectory (every 8K steps)
+
+| Step  | Loss  | Valid BLEU | LR       |
+|-------|-------|------------|----------|
+| 8K    | 3.997 | —          | 3.49e-4  |
+| 16K   | 3.155 | —          | 6.86e-4 (peak) |
+| 24K   | 2.902 | 26.13      | 5.70e-4  |
+| 32K   | 2.800 | 27.30      | 4.93e-4  |
+| 40K   | 2.748 | 27.75      | 4.41e-4  |
+| 48K   | 2.691 | 28.57      | 4.03e-4  |
+| 56K   | 2.653 | 28.87      | 3.73e-4  |
+| 64K   | 2.625 | 29.52      | 3.48e-4  |
+| 72K   | 2.612 | 29.64      | 3.28e-4  |
+| 80K   | 2.611 | 29.77      | 3.12e-4  |
+| 86K   | 2.592 | **30.00**  | 3.01e-4  |
+| 96K   | 2.583 | 30.00      | 2.86e-4  |
+| 100K  | 2.566 | 29.89      | 2.80e-4  |
+
+Loss curve is monotonic with no spikes; BLEU rises nearly monotonically from
+24.73 @ 20K to 30.00, then oscillates ±0.25 in the convergence band.
+
+### Sample translations (averaged checkpoint, newstest2013)
+
+```
+SRC: A Republican strategy to counter the re-election of Obama
+HYP: Stratégie républicaine de lutte contre la réélection d'Obama
+REF: Une stratégie républicaine pour contrer la réélection d'Obama
+
+SRC: Also the effect of vitamin D on cancer is not clear.
+HYP: L'effet de la vitamine D sur le cancer n'est pas non plus clair.
+REF: L'effet de la vitamine D sur le cancer n'est pas clairement établi non plus.
+
+SRC: In Israel, holy places await Ukrainian tourists, the omphalos and a sea
+     of saline water
+HYP: En Isra ⁇ l, des lieux saints attendent des touristes ukrainiens, des
+     omphalos et une mer d'eau sali
+REF: En Israël, des lieux saints, le Centre du monde et une mer de saumure
+     attendent les touristes ukrainiens
+```
+
+Observations:
+- **Gender agreement is learned**: "Republican" → "républicaine" (feminine, to
+  agree with "stratégie").
+- **Discourse markers transfer**: "Also" correctly translates as "non plus"
+  (the French idiom for negated "also"), not a literal "aussi".
+- **Elision is 90% correct**: "d'Obama" (not "de Obama"), "l'effet" (not
+  "le effet"), "n'est" (not "ne est").
+- **SPM `<unk>` shows up as `⁇`**: "Israël" → "Isra ⁇ l". Caused by
+  `character_coverage=0.9995` dropping rare accented chars. Hits ~4.4% of
+  French valid sentences; roughly a 0.5 BLEU ceiling to reclaim in the next
+  iteration by using `character_coverage=1.0`.
+
+### Why this worked (contrast with zh-en)
+
+Same codebase, same Transformer, same training loop — different outcome.
+The differences that matter:
+
+1. **Shared script**: both sides are Latin. Shared BPE vocab aligns cognates,
+   function words, and numerals. For zh-en the "shared" 32K vocab degenerates
+   into two disjoint halves that never interact.
+2. **Clean data**: WMT14 en-fr's Europarl + News Commentary + filtered Common
+   Crawl has much less boilerplate per unique sentence than WMT17 zh-en's
+   UN / news-agency attractors.
+3. **Loss landscape has a conditional minimum**: the model finds
+   "condition on source" as a better local minimum than
+   "unconditional French LM". For zh-en, the unconditional LM minimum at loss
+   ~4.8 is deeper than any conditional signal cross-attention could generate
+   from the disjoint vocab.
+
+### Configuration and compute
+
+- Hardware: single RTX 5090 (32 GB VRAM)
+- Precision: BF16 autocast
+- Optimizer: Adam (β₁=0.9, β₂=0.98, ε=1e-9)
+- LR schedule: Noam with peak 6.86e-4 at step ~16K, min_lr floor 1e-5
+- Warmup: 4000 steps
+- Gradient clip: 1.0
+- Loss spike guard: ratio 1.3, EMA α 0.005 (inherited from Big zh-en failure
+  analysis). **Triggered exactly once** in 100K steps, at step 17753 — cleanly
+  dropped a polluted batch; no training disruption.
+- Effective batch: ~100K tokens (24576 × 4 accumulation)
+- Training time: **2h 5m 23s**, end-to-end.
+
+### Reproducing this result
+
+```bash
+python scripts/download_wmt_enfr.py --max-train-samples 10000000
+python scripts/clean_data_enfr.py
+python scripts/train_tokenizer.py \
+    --inputs data/train.clean.en data/train.clean.fr \
+    --model-prefix data/spm_enfr --vocab-size 32000
+python train.py --config configs/base_en_fr.yaml
+python scripts/average_checkpoints.py --ckpt-dir checkpoints_enfr --n 5
+python scripts/eval_bleu.py \
+    --ckpt checkpoints_enfr/averaged.pt \
+    --config configs/base_en_fr.yaml \
+    --src data/test.en --ref data/test.fr
+```
+
+### Roadmap
+
+1. Push this Base config to its ceiling with pure training tricks (no extra
+   data, no back-translation): fix SPM `character_coverage=1.0`, tune beam
+   size / length penalty, try exponential moving-average (EMA) weights, widen
+   the averaging window.
+2. Train Big (~210M params) on WMT14 en-fr with the same pipeline. Expected
+   ceiling: ~36–37 sacrebleu.
+3. Repeat the full pipeline on WMT14 en-de, where the paper reports Base 27.3
+   and Big 28.4 — the most-cited MT benchmark.
+4. Produce a final report comparing all four runs (zh-en Base failed, zh-en
+   Big failed, en-fr Base ✅, en-fr Big, en-de Base, en-de Big).
 
 ## Failure Case: Base on WMT17 zh-en
 
@@ -380,11 +576,13 @@ See `configs/base_en_fr.yaml` and the en-fr results section below.
 
 ## Hardware Used
 
-- GPU: NVIDIA RTX 5090 (32GB VRAM)
-- Mixed precision: FP16
+- GPU: NVIDIA RTX 5090 (32 GB VRAM, Blackwell sm_120)
+- Mixed precision: BF16 (default for en-fr and Big zh-en) / FP16 (Base zh-en historical)
 
 ## References
 
 - Vaswani et al., *Attention Is All You Need* (2017). [[arxiv]](https://arxiv.org/abs/1706.03762)
 - WMT17 Shared Task: Machine Translation. [[link]](https://www.statmt.org/wmt17/)
+- WMT14 Translation Task. [[link]](https://www.statmt.org/wmt14/translation-task.html)
+- Post, *A Call for Clarity in Reporting BLEU Scores* (2018, sacrebleu). [[arxiv]](https://arxiv.org/abs/1804.08771)
 - SentencePiece: [[github]](https://github.com/google/sentencepiece)
