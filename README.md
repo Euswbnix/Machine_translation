@@ -200,7 +200,7 @@ python translate.py --checkpoint checkpoints/best.pt
 
 | Config | Valid BLEU | Test BLEU | Training time |
 |--------|-----------|-----------|---------------|
-| Base   | 0.77 (plateau) | — | ~4 days on 5090 |
+| Base   | 0.77 (plateau) | — | ~1.5 days on 5090 |
 | Big    | TBD       | TBD       | TBD           |
 
 ## Failure Case: Base on WMT17 zh-en
