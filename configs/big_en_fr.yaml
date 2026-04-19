@@ -1,0 +1,85 @@
+# Transformer Big — WMT14 en-fr
+# Built on top of the Base en-fr result (BLEU 30.00 valid / 34.69 test avg).
+# Same codebase, same tokenizer, scaled up d_model/heads/ffn per Vaswani.
+#
+# Carried-over lessons from Big zh-en (the failed run) and Base en-fr:
+#   - bf16 (fp16 added failure axis for Big, we ruled out that risk)
+#   - 8K warmup (4K too short for Big: early LR ramp destabilized weights)
+#   - lr_scale 1.5 (safe with 8K warmup)
+#   - min_lr floor 1e-5 (prevent Noam → 0 in late training)
+#   - spike guard ratio 1.3 / EMA α 0.005 (tight — catches staircase drift)
+#   - dropout 0.2 (middle ground: paper uses 0.1 with 36M pairs,
+#                   we use 10M pairs so slightly higher insurance)
+
+model:
+  d_model: 1024
+  n_heads: 16
+  n_encoder_layers: 6
+  n_decoder_layers: 6
+  d_ff: 4096
+  dropout: 0.2
+  max_seq_len: 256
+  vocab_size: 32000
+  share_embeddings: true
+
+training:
+  # Big is memory-heavy. 5090 32GB with BF16 fits ~8K tokens / micro-batch.
+  # 4x accumulation → effective ~32K tokens/step (half of Base's 100K).
+  batch_size: 8192
+  max_sentences: 64
+  accumulate_steps: 4
+
+  # Schedule: 300K total matches Vaswani Big on en-fr. Wall time estimate on
+  # single 5090: ~30-40h. Resumable via Ctrl+C and --resume.
+  max_steps: 300000
+  warmup_steps: 8000
+  lr: 0.0007
+  lr_scale: 1.5              # peak ~7e-4, safe with 8K warmup
+  min_lr: 1.0e-5
+
+  label_smoothing: 0.1
+  clip_grad_norm: 1.0
+
+  fp16: false
+  bf16: true
+
+  seed: 42
+
+  save_interval: 5000
+  # Adaptive eval — Big's eval is slow, so sparser than Base early on
+  eval_interval: 20000
+  eval_interval_min: 3000
+  eval_loss_high: 4.0
+  eval_loss_low: 2.8
+  log_interval: 100
+
+  patience: 10
+  early_stopping: true
+  min_steps_before_early_stop: 120000
+  emergency_save_interval: 500
+
+  # Spike guard (from Big zh-en post-mortem)
+  loss_spike_ratio: 1.3
+  loss_ema_alpha: 0.005
+
+data:
+  src_lang: en
+  tgt_lang: fr
+  train_src: data/train.clean.en
+  train_tgt: data/train.clean.fr
+  valid_src: data/valid.en
+  valid_tgt: data/valid.fr
+  test_src: data/test.en
+  test_tgt: data/test.fr
+  spm_model: data/spm_enfr.model
+  max_tokens: 256
+  num_workers: 4
+
+inference:
+  beam_size: 5
+  length_penalty: 1.0
+  max_decode_len: 256
+
+checkpoint:
+  dir: checkpoints/big_enfr
+  keep_last: 5
