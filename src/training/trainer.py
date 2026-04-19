@@ -232,7 +232,7 @@ class Trainer:
                         print(f"Saving checkpoint at step {self.global_step}...")
                         self._save_checkpoint(f"interrupted_step_{self.global_step}.pt")
                         self._generate_report("interrupted")
-                        print(f"Checkpoint saved. Resume with: --resume checkpoints/interrupted_step_{self.global_step}.pt")
+                        print(f"Checkpoint saved. Resume with: --resume {self.ckpt_dir}/interrupted_step_{self.global_step}.pt")
                         return
 
                     loss, n_tokens = self._train_step(batch)
