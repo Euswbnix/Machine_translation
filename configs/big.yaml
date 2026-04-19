@@ -26,7 +26,7 @@ training:
   fp16: true
   seed: 42
   save_interval: 5000
-  eval_interval: 20000
+  eval_interval: 50000
   eval_interval_min: 2000
   eval_loss_high: 4.0
   eval_loss_low: 3.0
