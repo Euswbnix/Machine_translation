@@ -32,19 +32,41 @@ def _tokenize_worker_init(model_proto: bytes):
 def _tokenize_chunk_worker(args):
     """Tokenize a chunk of (src, tgt) line pairs and apply max_tokens filter.
 
-    Runs in a worker process; uses the module-level _WORKER_SP initialized by
-    _tokenize_worker_init to avoid reloading the SPM model per call.
+    Returns pre-packed numpy arrays (uint16 tokens + int32 per-sample lengths)
+    instead of Python lists. Keeps main-process memory flat: 2 bytes/token
+    vs ~28 bytes per Python int, and avoids 10^9-element list.extend() which
+    swaps the machine late in a 30M-pair run.
     """
     chunk_idx, src_lines, tgt_lines, max_tokens = args
     sp = _WORKER_SP
     src_batch = sp.encode(src_lines, add_bos=True, add_eos=True, out_type=int)
     tgt_batch = sp.encode(tgt_lines, add_bos=True, add_eos=True, out_type=int)
-    kept: list[tuple[list[int], list[int]]] = []
+
+    src_parts: list[np.ndarray] = []
+    tgt_parts: list[np.ndarray] = []
+    src_lens: list[int] = []
+    tgt_lens: list[int] = []
     for src_ids, tgt_ids in zip(src_batch, tgt_batch):
         if len(src_ids) > max_tokens or len(tgt_ids) > max_tokens:
             continue
-        kept.append((src_ids, tgt_ids))
-    return chunk_idx, kept
+        src_parts.append(np.asarray(src_ids, dtype=np.uint16))
+        tgt_parts.append(np.asarray(tgt_ids, dtype=np.uint16))
+        src_lens.append(len(src_ids))
+        tgt_lens.append(len(tgt_ids))
+
+    if src_parts:
+        src_arr = np.concatenate(src_parts)
+        tgt_arr = np.concatenate(tgt_parts)
+    else:
+        src_arr = np.empty(0, dtype=np.uint16)
+        tgt_arr = np.empty(0, dtype=np.uint16)
+    return (
+        chunk_idx,
+        src_arr,
+        tgt_arr,
+        np.asarray(src_lens, dtype=np.int32),
+        np.asarray(tgt_lens, dtype=np.int32),
+    )
 
 
 def _worker_init_ignore_signals(worker_id: int):
@@ -112,10 +134,13 @@ class TranslationDataset(Dataset):
         with open(src_path, "r") as f:
             n_lines = sum(1 for _ in f)
 
-        src_flat: list[int] = []
-        tgt_flat: list[int] = []
-        src_offsets: list[int] = [0]
-        tgt_offsets: list[int] = [0]
+        # Accumulate per-chunk numpy arrays; concatenate once at the end.
+        # Avoids building two Python lists of ~10^9 int objects, which would
+        # take ~50 GB and tank throughput via GC + swap near the tail.
+        src_arrays: list[np.ndarray] = []
+        tgt_arrays: list[np.ndarray] = []
+        src_lens_parts: list[np.ndarray] = []
+        tgt_lens_parts: list[np.ndarray] = []
         total = 0
 
         # Serialize SPM model once in the parent so workers can rebuild a
@@ -153,22 +178,39 @@ class TranslationDataset(Dataset):
             initializer=_tokenize_worker_init,
             initargs=(model_proto,),
         ) as pool:
-            for _chunk_idx, kept in pool.imap(_tokenize_chunk_worker, _chunk_iter(), chunksize=1):
-                for src_ids, tgt_ids in kept:
-                    src_flat.extend(src_ids)
-                    tgt_flat.extend(tgt_ids)
-                    src_offsets.append(len(src_flat))
-                    tgt_offsets.append(len(tgt_flat))
+            for _idx, src_arr, tgt_arr, s_lens, t_lens in pool.imap(
+                _tokenize_chunk_worker, _chunk_iter(), chunksize=1
+            ):
+                if s_lens.size:
+                    src_arrays.append(src_arr)
+                    tgt_arrays.append(tgt_arr)
+                    src_lens_parts.append(s_lens)
+                    tgt_lens_parts.append(t_lens)
                 # total grows as the generator is consumed; advance pbar to match.
                 pbar.update(total - last_total)
                 last_total = total
         pbar.update(total - last_total)
         pbar.close()
 
-        self.src_tokens = np.array(src_flat, dtype=np.uint16)
-        self.tgt_tokens = np.array(tgt_flat, dtype=np.uint16)
-        self.src_offsets = np.array(src_offsets, dtype=np.int64)
-        self.tgt_offsets = np.array(tgt_offsets, dtype=np.int64)
+        self.src_tokens = (
+            np.concatenate(src_arrays) if src_arrays else np.empty(0, dtype=np.uint16)
+        )
+        self.tgt_tokens = (
+            np.concatenate(tgt_arrays) if tgt_arrays else np.empty(0, dtype=np.uint16)
+        )
+        # Build offsets from cumulative per-sample lengths.
+        src_lens_all = (
+            np.concatenate(src_lens_parts) if src_lens_parts else np.empty(0, dtype=np.int32)
+        )
+        tgt_lens_all = (
+            np.concatenate(tgt_lens_parts) if tgt_lens_parts else np.empty(0, dtype=np.int32)
+        )
+        self.src_offsets = np.empty(len(src_lens_all) + 1, dtype=np.int64)
+        self.tgt_offsets = np.empty(len(tgt_lens_all) + 1, dtype=np.int64)
+        self.src_offsets[0] = 0
+        self.tgt_offsets[0] = 0
+        np.cumsum(src_lens_all, dtype=np.int64, out=self.src_offsets[1:])
+        np.cumsum(tgt_lens_all, dtype=np.int64, out=self.tgt_offsets[1:])
 
         n_pairs = len(self.src_offsets) - 1
         print(f"Loaded {n_pairs} pairs (filtered from {total})")
