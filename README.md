@@ -449,13 +449,13 @@ python scripts/eval_bleu.py \
 
 ## Success Case (tied): Big on WMT14 en-fr
 
-Trained Transformer Big (~209M params) on the **full cleaned WMT14 en-fr
-corpus (~36M pairs)** for 279K steps on the same single RTX 5090.
+Trained Transformer Big (~209M params) on the **same cleaned 9.3M-pair
+subset used for Base v1** for 279K steps on the same single RTX 5090.
 **Converged to BLEU 30.16 on newstest2013 and 34.66 on newstest2014** after
 7-checkpoint averaging — statistically tied with Base's 34.69 despite 3.5×
-parameters, 3.6× training data, and 2.8× training steps. The key lesson is
-*why they tied*: both models share the same tokenizer and hit the same
-non-capacity ceiling.
+parameters and 2.8× training steps on identical data. The key lesson is
+*why they tied*: same data, same tokenizer, different capacity — capacity
+is not the bottleneck.
 
 ![Big en-fr training curves](assets/training_curves_big_enfr_v1.png)
 
@@ -486,8 +486,9 @@ Total training time: **5h 52m** on a single RTX 5090 (BF16, effective batch
 ### Why Big tied Base instead of beating it
 
 Both runs end at ~34.7 sacrebleu on newstest2014. Given Big has 3.5× the
-parameters, the natural reaction is "is Big broken?" — but the diagnostics
-point clearly elsewhere:
+parameters and 2.8× the steps (on identical data and identical tokenizer),
+the natural reaction is "is Big broken?" — but the diagnostics point
+clearly elsewhere:
 
 1. **Shared tokenizer is the shared ceiling.** Both runs use the same
    SentencePiece model trained at `character_coverage=0.9995`, which drops
@@ -507,10 +508,13 @@ point clearly elsewhere:
    additional training signal into ≈ 0 test-BLEU gain.
 
 **So Big v1 is not a failed scale-up; it's a diagnostic run that proved
-the bottleneck is the preprocessing pipeline, not the model.** The next
-iteration (Base v2) fixes both: `character_coverage=1.0` to remove the UNK
-ceiling, and keeps the 36M full-corpus data Big v1 validated. Expected gain
-from the two combined: +1.5 to +2.5 sacrebleu.
+the bottleneck is the preprocessing pipeline, not the model.** Base v2 now
+addresses both axes independently: `character_coverage=1.0` to remove the
+UNK ceiling, and — since discovery during v2 setup revealed the raw
+download was accidentally capped at 10M pairs back in v1 — a fresh
+full-corpus download (raw ~40M → cleaned ~25-30M) to finally exercise the
+data axis v1 never got. Expected gain from the two combined: +1.5 to +2.5
+sacrebleu.
 
 ### Sample translations (averaged checkpoint, newstest2013)
 
@@ -553,11 +557,14 @@ Base v1 and Big v1 both hit the same ≈ 34.7 test-BLEU ceiling imposed by
 the shared tokenizer and BLEU's single-reference limitation. The next two
 iterations target that ceiling directly before proceeding to en-de:
 
-1. **Base v2** (in progress) — retrain SPM at `character_coverage=1.0`
-   on the full 36M corpus, then retrain Base for 200K steps on that corpus.
-   This stacks all three interventions validated by v1: SPM coverage fix
-   (+0.3 to +0.8), full data (+1 to +2), 2× step budget (needed to actually
-   traverse the larger corpus). Target: **test BLEU 36–37**.
+1. **Base v2** (in progress) — re-download the full WMT14 en-fr corpus
+   (v1 was accidentally capped at 10M raw pairs by `--max-train-samples`;
+   full corpus is ~40M raw → ~25-30M after the same cleaning pipeline),
+   retrain SPM at `character_coverage=1.0` on that corpus, then train Base
+   for 200K steps. This stacks all three v1-validated interventions: SPM
+   coverage fix (+0.3 to +0.8), full data (+1 to +2), 2× step budget
+   (needed to actually traverse the larger corpus). Target: **test
+   BLEU 36–37**.
 2. **WMT14 en-de Base + Big** — repeat the full pipeline. Paper reports
    Base 27.3, Big 28.4 (tokenized); sacrebleu equivalent ~25-26 / 26-27.
    This is the most-cited MT benchmark — a useful apples-to-apples
