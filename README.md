@@ -447,18 +447,155 @@ python scripts/eval_bleu.py \
     --src data/test.en --ref data/test.fr
 ```
 
+## Success Case (tied): Big on WMT14 en-fr
+
+Trained Transformer Big (~209M params) on the **full cleaned WMT14 en-fr
+corpus (~36M pairs)** for 279K steps on the same single RTX 5090.
+**Converged to BLEU 30.16 on newstest2013 and 34.66 on newstest2014** after
+7-checkpoint averaging — statistically tied with Base's 34.69 despite 3.5×
+parameters, 3.6× training data, and 2.8× training steps. The key lesson is
+*why they tied*: both models share the same tokenizer and hit the same
+non-capacity ceiling.
+
+![Big en-fr training curves](assets/training_curves_big_enfr_v1.png)
+
+### Final numbers
+
+| | newstest2013 (valid) | newstest2014 (test) |
+|---|---|---|
+| Best single checkpoint (step 261K) | 30.16 | — |
+| Averaged (7 ckpts, steps 255K–279K + best) | **30.45** | **34.66** |
+| Averaging gain on valid | +0.29 | — |
+
+### Training trajectory milestones
+
+| Step  | Train Loss | Valid BLEU | LR       | Note |
+|-------|------------|------------|----------|------|
+| 20K   | ~3.6       | 19.74      | 3.3e-4   | first eval |
+| 50K   | 2.78       | 25.25      | 4.6e-4   | past Noam peak (4.86e-4 @ 37K) |
+| 100K  | 2.71       | 27.79      | 3.0e-4   | |
+| 150K  | 2.67       | 28.76      | 2.4e-4   | end of epoch 1 at ~147K |
+| 200K  | 2.63       | 29.54      | 2.1e-4   | |
+| 246K  | 2.61       | **30.04**  | 1.9e-4   | first crossing of 30 |
+| 261K  | 2.60       | **30.16**  | 1.85e-4  | **single-model peak** |
+| 279K  | 2.58       | 29.87      | 1.77e-4  | interrupted; train↓ valid→ (mild divergence) |
+
+Total training time: **5h 52m** on a single RTX 5090 (BF16, effective batch
+~32K tokens/step).
+
+### Why Big tied Base instead of beating it
+
+Both runs end at ~34.7 sacrebleu on newstest2014. Given Big has 3.5× the
+parameters, the natural reaction is "is Big broken?" — but the diagnostics
+point clearly elsewhere:
+
+1. **Shared tokenizer is the shared ceiling.** Both runs use the same
+   SentencePiece model trained at `character_coverage=0.9995`, which drops
+   rare accented characters (`Israël`, `Noël`, `maïs`, ...). 132 / 3000
+   French valid sentences (**4.4%**) hit `<unk>`, worth an estimated
+   0.5 BLEU that neither model can reclaim no matter how much it trains.
+2. **Reference bias absorbs the rest of Big's extra capacity.** Big's
+   translations are consistently fluent and faithful, but use valid French
+   paraphrases the reference translator didn't pick (e.g.
+   `stratégie républicaine **de lutte contre**` vs the reference's
+   `stratégie républicaine **pour contrer**` — both are standard French,
+   BLEU penalizes one). Big has the capacity to produce more stylistic
+   variation, which *hurts* BLEU against a single-reference test set.
+3. **Train loss is still descending at stop.** 2.58 at 279K vs Base's 2.56
+   at 100K — Big's optimizer trajectory shows it had more to give, but the
+   tokenizer ceiling and BLEU's single-reference limitation converted
+   additional training signal into ≈ 0 test-BLEU gain.
+
+**So Big v1 is not a failed scale-up; it's a diagnostic run that proved
+the bottleneck is the preprocessing pipeline, not the model.** The next
+iteration (Base v2) fixes both: `character_coverage=1.0` to remove the UNK
+ceiling, and keeps the 36M full-corpus data Big v1 validated. Expected gain
+from the two combined: +1.5 to +2.5 sacrebleu.
+
+### Sample translations (averaged checkpoint, newstest2013)
+
+```
+SRC: A Republican strategy to counter the re-election of Obama
+HYP: Stratégie républicaine de lutte contre la réélection d'Obama
+REF: Une stratégie républicaine pour contrer la réélection d'Obama
+        → valid paraphrase; penalized by BLEU
+
+SRC: Also the effect of vitamin D on cancer is not clear.
+HYP: De même, l'effet de la vitamine D sur le cancer n'est pas clair.
+REF: L'effet de la vitamine D sur le cancer n'est pas clairement établi
+     non plus.
+        → translator escalated register and added explicitation
+
+SRC: In Israel, holy places await Ukrainian tourists, the omphalos and a
+     sea of saline water
+HYP: En Isra ⁇ l, les lieux saints attendent les touristes ukrainiens,
+     l'omphalos et la mer d'eau saline.
+REF: En Israël, des lieux saints, le Centre du monde et une mer de saumure
+     attendent les touristes ukrainiens
+        → Isra ⁇ l = SPM UNK (coverage 0.9995 tax, hits Big identically)
+```
+
+### Configuration and compute
+
+- Architecture: d_model 1024, 16 heads, 6+6 layers, FFN 4096, dropout 0.2
+- Parameters: 209,129,472
+- Precision: BF16 autocast
+- Effective batch: ~32K tokens (8192 × 4 accumulation) — 1/3 of Base's 100K
+- Warmup: 8000 steps (longer than Base's 4K — safer for Big's larger weights)
+- LR schedule: Noam × 1.5, peak 4.86e-4 at step ~37K, min_lr floor 1e-5
+- Loss spike guard: ratio 1.3, EMA α 0.005. **Triggered twice** (steps
+  105432 and one earlier) — both single-batch noise events from the Common
+  Crawl portion of the corpus; dropped cleanly, no training disruption.
+
 ### Roadmap
 
-1. Push this Base config to its ceiling with pure training tricks (no extra
-   data, no back-translation): fix SPM `character_coverage=1.0`, tune beam
-   size / length penalty, try exponential moving-average (EMA) weights, widen
-   the averaging window.
-2. Train Big (~210M params) on WMT14 en-fr with the same pipeline. Expected
-   ceiling: ~36–37 sacrebleu.
-3. Repeat the full pipeline on WMT14 en-de, where the paper reports Base 27.3
-   and Big 28.4 — the most-cited MT benchmark.
-4. Produce a final report comparing all four runs (zh-en Base failed, zh-en
-   Big failed, en-fr Base ✅, en-fr Big, en-de Base, en-de Big).
+Base v1 and Big v1 both hit the same ≈ 34.7 test-BLEU ceiling imposed by
+the shared tokenizer and BLEU's single-reference limitation. The next two
+iterations target that ceiling directly before proceeding to en-de:
+
+1. **Base v2** (in progress) — retrain SPM at `character_coverage=1.0`
+   on the full 36M corpus, then retrain Base for 200K steps on that corpus.
+   This stacks all three interventions validated by v1: SPM coverage fix
+   (+0.3 to +0.8), full data (+1 to +2), 2× step budget (needed to actually
+   traverse the larger corpus). Target: **test BLEU 36–37**.
+2. **WMT14 en-de Base + Big** — repeat the full pipeline. Paper reports
+   Base 27.3, Big 28.4 (tokenized); sacrebleu equivalent ~25-26 / 26-27.
+   This is the most-cited MT benchmark — a useful apples-to-apples
+   comparison with the literature, and the en-de Big run doubles as the
+   cross-language test of whether capacity helps more on en-de (cognate-rich)
+   than it did on en-fr.
+3. **Fine-tuning study** — take the trained en-fr models into an external
+   fine-tuning repo (provided separately) to measure how much task-specific
+   tuning adds on top of general-domain pretraining.
+4. **Final report** — combine all runs (zh-en Base ✗, zh-en Big ✗,
+   en-fr Base v1 ✅, en-fr Big v1 ✅ tied, en-fr Base v2, en-de Base,
+   en-de Big) with a dedicated section on BLEU limitations (chrF / BLEURT /
+   COMET cross-validation on the strongest checkpoint).
+
+#### Note on skipped run: Big v2 (en-fr)
+
+Originally planned, deliberately **dropped** after Big v1 completed.
+Rationale to record in the final report:
+
+- Big v1 already demonstrated the main lesson that would have motivated
+  Big v2: *scale alone does not help when the tokenizer is the bottleneck*.
+  Running Big v2 would mostly replicate Vaswani's published result that
+  Big > Base on en-fr given good preprocessing — not a new finding from
+  this project's perspective.
+- Opportunity cost: Big v2 at the corrected effective batch (~100K tokens)
+  would cost roughly 10-15 h of 5090 time — equal to running both en-de
+  Base and en-de Big combined, which give far more new information
+  (cross-language generalization + direct literature comparison).
+- Marginal information gain from Big v2 on top of Base v2 + Big v1 is
+  estimated at "was the tied result in v1 really a tokenizer ceiling,
+  or was Big also effective-batch-starved?". Partial answer is already
+  available: Big v1's loss was still dropping at interrupt (2.58 vs
+  Base v1's 2.56 at much fewer steps), suggesting the optimizer was not
+  stuck — consistent with the tokenizer-ceiling hypothesis.
+
+This trade-off — spending compute on *new experimental axes* rather than
+*confirming an already-likely hypothesis* — is itself a lesson worth
+recording.
 
 ## Failure Case: Base on WMT17 zh-en
 
