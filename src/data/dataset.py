@@ -4,16 +4,47 @@ Memory-efficient storage: tokens are stored as flat numpy uint16 arrays with
 offset indices, and cached to disk after the first tokenization pass.
 """
 
+import multiprocessing as mp
+import os
 import random
 import signal
 from pathlib import Path
 
 import numpy as np
+import sentencepiece as spm
 import torch
 from torch.utils.data import Dataset, DataLoader, Sampler
 from tqdm import tqdm
 
 from .tokenizer import Tokenizer, PAD_ID
+
+
+_WORKER_SP: "spm.SentencePieceProcessor | None" = None
+
+
+def _tokenize_worker_init(model_proto: bytes):
+    global _WORKER_SP
+    sp = spm.SentencePieceProcessor()
+    sp.LoadFromSerializedProto(model_proto)
+    _WORKER_SP = sp
+
+
+def _tokenize_chunk_worker(args):
+    """Tokenize a chunk of (src, tgt) line pairs and apply max_tokens filter.
+
+    Runs in a worker process; uses the module-level _WORKER_SP initialized by
+    _tokenize_worker_init to avoid reloading the SPM model per call.
+    """
+    chunk_idx, src_lines, tgt_lines, max_tokens = args
+    sp = _WORKER_SP
+    src_batch = sp.encode(src_lines, add_bos=True, add_eos=True, out_type=int)
+    tgt_batch = sp.encode(tgt_lines, add_bos=True, add_eos=True, out_type=int)
+    kept: list[tuple[list[int], list[int]]] = []
+    for src_ids, tgt_ids in zip(src_batch, tgt_batch):
+        if len(src_ids) > max_tokens or len(tgt_ids) > max_tokens:
+            continue
+        kept.append((src_ids, tgt_ids))
+    return chunk_idx, kept
 
 
 def _worker_init_ignore_signals(worker_id: int):
@@ -69,13 +100,15 @@ class TranslationDataset(Dataset):
         self.src_lens = np.diff(self.src_offsets).astype(np.int32)
         self.tgt_lens = np.diff(self.tgt_offsets).astype(np.int32)
 
-    def _build_from_text(self, src_path: str, tgt_path: str, max_tokens: int, chunk_size: int = 100_000):
+    def _build_from_text(self, src_path: str, tgt_path: str, max_tokens: int, chunk_size: int = 50_000):
         """Tokenize raw text files and store as flat numpy arrays.
 
-        Reads both files in chunks and batch-encodes each chunk via
-        SentencePiece's multi-threaded C++ API (see Tokenizer.encode_batch).
+        Fans chunks of line pairs out to a multiprocessing.Pool where each
+        worker owns its own SentencePieceProcessor. Bypasses the GIL so
+        SPM's internal C++ threads stay fed. Chunks are consumed in order
+        (imap) so output offsets are deterministic and byte-for-byte match
+        the previous single-process implementation.
         """
-        # Count lines for progress bar
         with open(src_path, "r") as f:
             n_lines = sum(1 for _ in f)
 
@@ -83,41 +116,54 @@ class TranslationDataset(Dataset):
         tgt_flat: list[int] = []
         src_offsets: list[int] = [0]
         tgt_offsets: list[int] = [0]
-
         total = 0
 
-        def _flush(src_chunk: list[str], tgt_chunk: list[str]):
-            if not src_chunk:
-                return
-            src_batch = self.tokenizer.encode_batch(src_chunk)
-            tgt_batch = self.tokenizer.encode_batch(tgt_chunk)
-            for src_ids, tgt_ids in zip(src_batch, tgt_batch):
-                if len(src_ids) > max_tokens or len(tgt_ids) > max_tokens:
-                    continue
-                src_flat.extend(src_ids)
-                tgt_flat.extend(tgt_ids)
-                src_offsets.append(len(src_flat))
-                tgt_offsets.append(len(tgt_flat))
+        # Serialize SPM model once in the parent so workers can rebuild a
+        # processor locally — SentencePieceProcessor itself isn't picklable.
+        model_proto = self.tokenizer.sp.serialized_model_proto()
 
-        src_chunk: list[str] = []
-        tgt_chunk: list[str] = []
-        with open(src_path, "r") as f_src, open(tgt_path, "r") as f_tgt:
-            pbar = tqdm(total=n_lines, desc="Tokenizing")
-            for src_line, tgt_line in zip(f_src, f_tgt):
-                total += 1
-                pbar.update(1)
-                src_line = src_line.strip()
-                tgt_line = tgt_line.strip()
-                if not src_line or not tgt_line:
-                    continue
-                src_chunk.append(src_line)
-                tgt_chunk.append(tgt_line)
-                if len(src_chunk) >= chunk_size:
-                    _flush(src_chunk, tgt_chunk)
-                    src_chunk.clear()
-                    tgt_chunk.clear()
-            _flush(src_chunk, tgt_chunk)
-            pbar.close()
+        def _chunk_iter():
+            nonlocal total
+            src_chunk: list[str] = []
+            tgt_chunk: list[str] = []
+            chunk_idx = 0
+            with open(src_path, "r") as f_src, open(tgt_path, "r") as f_tgt:
+                for src_line, tgt_line in zip(f_src, f_tgt):
+                    total += 1
+                    src_line = src_line.strip()
+                    tgt_line = tgt_line.strip()
+                    if not src_line or not tgt_line:
+                        continue
+                    src_chunk.append(src_line)
+                    tgt_chunk.append(tgt_line)
+                    if len(src_chunk) >= chunk_size:
+                        yield (chunk_idx, src_chunk, tgt_chunk, max_tokens)
+                        chunk_idx += 1
+                        src_chunk = []
+                        tgt_chunk = []
+                if src_chunk:
+                    yield (chunk_idx, src_chunk, tgt_chunk, max_tokens)
+
+        n_procs = max(1, (os.cpu_count() or 2) // 2)
+        ctx = mp.get_context("spawn")
+        pbar = tqdm(total=n_lines, desc="Tokenizing")
+        last_total = 0
+        with ctx.Pool(
+            processes=n_procs,
+            initializer=_tokenize_worker_init,
+            initargs=(model_proto,),
+        ) as pool:
+            for _chunk_idx, kept in pool.imap(_tokenize_chunk_worker, _chunk_iter(), chunksize=1):
+                for src_ids, tgt_ids in kept:
+                    src_flat.extend(src_ids)
+                    tgt_flat.extend(tgt_ids)
+                    src_offsets.append(len(src_flat))
+                    tgt_offsets.append(len(tgt_flat))
+                # total grows as the generator is consumed; advance pbar to match.
+                pbar.update(total - last_total)
+                last_total = total
+        pbar.update(total - last_total)
+        pbar.close()
 
         self.src_tokens = np.array(src_flat, dtype=np.uint16)
         self.tgt_tokens = np.array(tgt_flat, dtype=np.uint16)
