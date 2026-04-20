@@ -1,5 +1,6 @@
 """SentencePiece BPE tokenizer wrapper for training and encoding."""
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -133,8 +134,23 @@ class Tokenizer:
         ids = [i for i in ids if i not in (PAD_ID, BOS_ID, EOS_ID)]
         return self.sp.DecodeIds(ids)
 
-    def encode_batch(self, texts: list[str], add_bos: bool = True, add_eos: bool = True) -> list[list[int]]:
-        return [self.encode(t, add_bos, add_eos) for t in texts]
+    def encode_batch(
+        self,
+        texts: list[str],
+        add_bos: bool = True,
+        add_eos: bool = True,
+        num_threads: int | None = None,
+    ) -> list[list[int]]:
+        # SPM thread count is tunable; default to all cores for C++-side parallelism.
+        if num_threads is None:
+            num_threads = os.cpu_count() or 1
+        return self.sp.encode(
+            texts,
+            add_bos=add_bos,
+            add_eos=add_eos,
+            num_threads=num_threads,
+            out_type=int,
+        )
 
     def decode_batch(self, batch_ids: list[list[int]]) -> list[str]:
         return [self.decode(ids) for ids in batch_ids]
