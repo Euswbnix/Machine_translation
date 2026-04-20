@@ -1,29 +1,20 @@
-# Transformer Base — WMT14 en-fr (v2: three improvements stacked)
+# Transformer Base — WMT14 en-fr (v3: proper step budget for 30M corpus)
 #
-# v1 (100K steps, 10M pairs, SPM coverage 0.9995) got BLEU 30.00 valid /
-# 34.69 test-averaged (sacrebleu 13a). v2 stacks:
-#   1. SPM character_coverage=1.0  → no <unk> on Israël / Noël / maïs etc.
-#                                    expected gain: +0.3 to +0.8 BLEU
-#   2. Full WMT14 corpus (~36M pairs vs 10M subset)
-#                                    expected gain: +1 to +2 BLEU
-#   3. 2x training budget (200K steps) to actually use the larger corpus
-#                                    effective batch kept at Base's original
-#                                    100K tokens/step (it was fine, the batch
-#                                    bottleneck was specific to Big)
-# Combined target: test BLEU ~36.7 (sacrebleu), close to paper Base 38.1
-# (tokenized) which equals ~35-36 sacrebleu.
+# v2 (200K steps, 30M pairs, SPM coverage 1.0) capped at valid 27.77 — under
+# v1's 28 ceiling. Post-mortem: 200K steps on 30M pairs = ~1.3 epochs, vs
+# v1's ~4 epochs on 9.3M. LR schedule decayed before the model finished
+# learning. Fix: scale step budget to restore ~4 epochs of exposure.
 #
-# PREREQ before using this config:
-#   # 1. Download full corpus (no --max-train-samples cap)
-#   python scripts/download_wmt_enfr.py
-#   # 2. Clean
-#   python scripts/clean_data_enfr.py
-#   # 3. Retrain SPM at 1.0 coverage (overwrites spm_enfr.model)
-#   python scripts/train_tokenizer.py \
-#       --inputs data/train.clean.en data/train.clean.fr \
-#       --model-prefix data/spm_enfr \
-#       --vocab-size 32000 \
-#       --character-coverage 1.0
+# v3 changes from v2:
+#   - max_steps:    200000 → 600000   (3× to match 3× data)
+#   - warmup_steps: 4000   → 12000    (keep warmup/total ratio)
+#   - save_interval:10000  → 15000    (avoid ckpt spam)
+#   - min_steps_before_early_stop: 80000 → 240000 (proportional)
+#   - eval_interval kept at 30000 — we want dense signal across the longer run
+# SPM, data, architecture unchanged from v2.
+#
+# Runtime estimate: ~48h on 5090 at ~100K tok/s.
+# Target: break 28 valid BLEU, land 29-30 post-averaging.
 
 model:
   d_model: 512
@@ -42,10 +33,8 @@ training:
   max_sentences: 192
   accumulate_steps: 4
 
-  # v1 ran 100K and converged on 10M data. 36M is 3.6x more data, so bump
-  # budget to 200K steps so the model actually sees each pair enough times.
-  max_steps: 200000
-  warmup_steps: 4000
+  max_steps: 600000
+  warmup_steps: 12000
   lr: 0.0007
   lr_scale: 1.0
   min_lr: 1.0e-5
@@ -58,7 +47,7 @@ training:
 
   seed: 42
 
-  save_interval: 10000
+  save_interval: 15000
   # Adaptive eval — sparse early, dense once loss crosses the band
   eval_interval: 30000
   eval_interval_min: 3000
@@ -68,7 +57,7 @@ training:
 
   patience: 10
   early_stopping: true
-  min_steps_before_early_stop: 80000
+  min_steps_before_early_stop: 240000
   emergency_save_interval: 500
 
   # Spike guard (battle-tested on both en-fr and Big zh-en)
