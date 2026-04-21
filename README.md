@@ -4,15 +4,20 @@ A from-scratch PyTorch implementation of the Transformer (Vaswani et al., 2017),
 trained on WMT parallel corpora without any pretrained weights.
 
 **Current status:** Transformer Base on WMT14 en-fr — **34.69 BLEU on newstest2014**
-(sacrebleu 13a, checkpoint-averaged). See *Success Case: Base on WMT14 en-fr* below.
+(sacrebleu 13a, checkpoint-averaged, v1 run on 9.3M strict-filtered pairs).
+See *Success Case: Base on WMT14 en-fr* below.
 
 **Full trajectory** (documented in this README as success → failure → diagnosis):
 1. ❌ Base on WMT17 zh-en — mode collapse, BLEU 0.77
 2. ❌ Big on WMT17 zh-en — mode collapse, BLEU 0.47
-3. ✅ Base on WMT14 en-fr — BLEU 34.69 (averaged), converged cleanly
+3. ✅ Base on WMT14 en-fr (v1) — BLEU 34.69 (averaged), converged cleanly
+4. 〰️ Big on WMT14 en-fr (v1) — BLEU 34.66 (tied Base, hit tokenizer ceiling)
+5. ❌ Base on WMT14 en-fr (v2) — 27.77 underfit (200K steps on 30M pairs = 1.3 epochs)
+6. ✅ Base on WMT14 en-fr (v3) — BLEU 33.90 test, 29.23 valid (600K steps, 4 epochs);
+   **below v1 despite 3× data + 6× steps** — the data-quality/quantity trap.
 
-Next: push Base en-fr to its ceiling, train Big on en-fr, repeat the pipeline
-on WMT14 en-de, then produce a final report.
+Next: Big v2 on v3's data (tests whether capacity absorbs the noisier 30M
+corpus), then WMT14 en-de Base + Big, then final report.
 
 ## Features
 
@@ -551,58 +556,155 @@ REF: En Israël, des lieux saints, le Centre du monde et une mer de saumure
   105432 and one earlier) — both single-batch noise events from the Common
   Crawl portion of the corpus; dropped cleanly, no training disruption.
 
-### Roadmap
+## Ablation: Base v2 → v3 on WMT14 en-fr (data × steps, and the data-quality trap)
 
-Base v1 and Big v1 both hit the same ≈ 34.7 test-BLEU ceiling imposed by
-the shared tokenizer and BLEU's single-reference limitation. The next two
-iterations target that ceiling directly before proceeding to en-de:
+Two follow-up runs were designed to attack Base v1's ≈ 34.7 test-BLEU
+ceiling by stacking "obvious" improvements: more data, SPM coverage fix,
+longer training. The result is a **surprise negative finding**: despite
+3× more data, 6× more steps, and a stricter SPM, Base v3 ended up
+**below** Base v1 on both valid and test. The two runs together nail
+down *why*.
 
-1. **Base v2** (in progress) — re-download the full WMT14 en-fr corpus
-   (v1 was accidentally capped at 10M raw pairs by `--max-train-samples`;
-   full corpus is ~40M raw → ~25-30M after the same cleaning pipeline),
-   retrain SPM at `character_coverage=1.0` on that corpus, then train Base
-   for 200K steps. This stacks all three v1-validated interventions: SPM
-   coverage fix (+0.3 to +0.8), full data (+1 to +2), 2× step budget
-   (needed to actually traverse the larger corpus). Target: **test
-   BLEU 36–37**.
-2. **WMT14 en-de Base + Big** — repeat the full pipeline. Paper reports
-   Base 27.3, Big 28.4 (tokenized); sacrebleu equivalent ~25-26 / 26-27.
-   This is the most-cited MT benchmark — a useful apples-to-apples
-   comparison with the literature, and the en-de Big run doubles as the
-   cross-language test of whether capacity helps more on en-de (cognate-rich)
-   than it did on en-fr.
-3. **Fine-tuning study** — take the trained en-fr models into an external
-   fine-tuning repo (provided separately) to measure how much task-specific
-   tuning adds on top of general-domain pretraining.
-4. **Final report** — combine all runs (zh-en Base ✗, zh-en Big ✗,
-   en-fr Base v1 ✅, en-fr Big v1 ✅ tied, en-fr Base v2, en-de Base,
-   en-de Big) with a dedicated section on BLEU limitations (chrF / BLEURT /
-   COMET cross-validation on the strongest checkpoint).
+### The three runs side-by-side
 
-#### Note on skipped run: Big v2 (en-fr)
+| Run      | Data       | SPM cov. | Steps | Valid (avg) | Test (avg) |
+|----------|-----------|----------|-------|-------------|------------|
+| Base v1  | 9.3M strict filter | 0.9995 | 100K | ~30.00 | **34.69** |
+| Base v2  | 30M loose filter | 1.0    | 200K | 27.77 (single) | — (skipped) |
+| Base v3  | 30M loose filter | 1.0    | 600K | **29.23** | 33.90 |
 
-Originally planned, deliberately **dropped** after Big v1 completed.
-Rationale to record in the final report:
+All three on the same single RTX 5090, same Transformer Base architecture.
+The only differences between runs are those three columns.
 
-- Big v1 already demonstrated the main lesson that would have motivated
-  Big v2: *scale alone does not help when the tokenizer is the bottleneck*.
-  Running Big v2 would mostly replicate Vaswani's published result that
-  Big > Base on en-fr given good preprocessing — not a new finding from
-  this project's perspective.
-- Opportunity cost: Big v2 at the corrected effective batch (~100K tokens)
-  would cost roughly 10-15 h of 5090 time — equal to running both en-de
-  Base and en-de Big combined, which give far more new information
-  (cross-language generalization + direct literature comparison).
-- Marginal information gain from Big v2 on top of Base v2 + Big v1 is
-  estimated at "was the tied result in v1 really a tokenizer ceiling,
-  or was Big also effective-batch-starved?". Partial answer is already
-  available: Big v1's loss was still dropping at interrupt (2.58 vs
-  Base v1's 2.56 at much fewer steps), suggesting the optimizer was not
-  stuck — consistent with the tokenizer-ceiling hypothesis.
+### Base v2 (the underfit)
 
-This trade-off — spending compute on *new experimental axes* rather than
-*confirming an already-likely hypothesis* — is itself a lesson worth
-recording.
+Planned as "v1 + three improvements stacked": full WMT14 corpus (v1 was
+accidentally capped at 10M raw by `--max-train-samples`; full is ~40M
+raw → 30M after cleaning), `character_coverage=1.0` (fixes the `Isra⁇l`
+`<unk>` visible in v1's samples), 2× step budget (200K, reasoned as
+"more data needs more steps"). Target was test BLEU 36-37.
+
+**What went wrong**: 200K steps on 30M pairs = ~1.3 epochs, vs v1's
+~4 epochs on 9.3M. The Noam LR schedule decayed on 200K's clock, so the
+model reached the decay tail having seen each sample barely more than
+once — classic underfit. Valid BLEU trajectory plateaued at 27.77 and
+never broke v1's 28+ range:
+
+| Step  | Valid BLEU |
+|-------|-----------|
+| 30K   | 23.13 |
+| 98K   | 27.01 |
+| 141K  | 27.48 |
+| 194.9K | **27.77** (best) |
+| 200K (final) | plateau |
+
+Averaging would have added ~+0.3 at most — not enough to matter. Run
+was shelved without full evaluation and rerun as v3.
+
+### Base v3 (the fix — and the surprise)
+
+Scaled the step budget proportionally to data growth:
+
+- `max_steps: 200000 → 600000` (3× to restore ~4 epochs like v1)
+- `warmup_steps: 4000 → 12000` (keep warmup/total ratio)
+- Everything else identical to v2
+
+**v3 ran cleanly for 12h45m, finished exactly 4 epochs, best single
+checkpoint BLEU 29.06 at step 537K, averaged 29.23 / test 33.90.** The
+curve decisively broke v2's 27.77 plateau at step 260K (first > 28) and
+climbed into the 28.8-29.0 band by 455K.
+
+Trajectory (sampled):
+
+| Step  | Valid BLEU | Note |
+|-------|-----------|------|
+| 30K   | 18.75 | LR still in warmup (warmup ends at 48K logging-step due to 4× grad accumulation) |
+| 94K   | 25.86 | matches v2 at ~similar *schedule fraction*, not absolute step |
+| 234K  | 27.85 | **first time above v2's final 27.77** (only 39% of schedule used) |
+| 260K  | 28.21 | first break above 28 |
+| 311K  | 28.64 | new best |
+| 419K  | 28.78 | |
+| 467K  | 29.03 | |
+| 537K  | **29.06** | best single checkpoint |
+| 600K  | 28.75 (final) | |
+
+**So v3 fixes v2 cleanly — +1.29 valid BLEU, +1.28 over v1 single-ckpt
+too. The fix itself is boring: step budget has to scale with data
+size.** The interesting part is what happens next.
+
+### The surprise: v3 test < v1 test despite more of everything
+
+Averaged numbers put v3 at **33.90 test** vs v1's **34.69 test**. v3
+lost 0.79 BLEU to v1 despite 3× more training data, 6× more training
+steps, and an SPM that fixes the `<unk>`-on-accent problem v1 had.
+
+This isn't the step-budget issue (v3 is fully converged, 4 epochs,
+averaged). And it's not noise — the gap shows up on both valid (-0.77)
+and test (-0.79).
+
+Three candidate explanations, ranked by what we believe:
+
+1. **Data quality beat data quantity.** v1 kept 9.3M / 40M (23% keep
+   rate) under the stricter cleaning thresholds — tight length ratio,
+   high Latin-script ratio, aggressive duplicate filter. v2/v3 kept
+   30M / 40M (74%) by relaxing those thresholds. The extra 20M pairs
+   carry more misaligned, mixed-language, and parliamentary-filler
+   content that dilutes the gradient signal toward newstest-style prose.
+2. **SPM `character_coverage=1.0` may hurt on noisy data.** It was
+   designed to fix rare-accent `<unk>` (Israël, Noël). With a cleaner
+   corpus this is pure win. With a noisier corpus, letting every OCR
+   artifact or scanner glitch survive as a real token adds noise to the
+   softmax that a 0.9995 coverage would have squashed to `<unk>`. This
+   is a hypothesis — not directly measured.
+3. **Train/test domain shift.** newstest2014 is tight news prose. The
+   extra 20M pairs in v2/v3 lean more on Europarl/CommonCrawl mixtures
+   that drift away from this register, nudging the model's generation
+   distribution slightly off-target.
+
+The combined lesson: **filter first, scale second**. The naive "more data
+is always better" assumption fails when "more" means "lower-quality
+more".
+
+### What v2 → v3 teaches
+
+- **v2 vs v3**: the textbook lesson — step budget must match data scale.
+  v2's underfit at 27.77 vs v3's 29.06 is the cleanest possible
+  demonstration, same data, same architecture, only difference is LR
+  schedule length.
+- **v1 vs v3**: the *non-textbook* lesson — quality/quantity trade-off
+  isn't free. 20M extra noisy pairs lost 0.79 test BLEU even after
+  spending 6× compute to train on them.
+- **Combined prescription**: the next run should reuse v1's strict
+  cleaning thresholds on the full 40M raw corpus (yielding perhaps
+  10-12M *cleanly-aligned* pairs instead of v1's accidentally-truncated
+  9.3M), then train at a v3-style extended schedule. That decouples
+  "quality" from "quantity" so both gains compound instead of fighting.
+
+### Roadmap (updated)
+
+1. **Big v2 (en-fr)** — reinstated (previously marked skipped after Big
+   v1 tied Base v1). With v3's data and schedule now characterized, Big
+   v2 is the cleanest test of whether model capacity helps absorb the
+   noisier 30M corpus — i.e., whether 209M params can fit what 60M
+   cannot. If Big v2 on v3's data reaches v1's ceiling (~34.7) or
+   higher, the answer is yes; if it stays in v3's ~34 range, capacity
+   doesn't fix data quality.
+2. **WMT14 en-de Base + Big** — the most-cited MT benchmark, apples-to-apples
+   with the literature. Paper reports Base 27.3, Big 28.4 (tokenized);
+   sacrebleu equivalent ~25-26 / 26-27.
+3. **Strict-filter en-fr rerun (optional)** — if Big v2 doesn't recover
+   the v1 test number, re-clean the 40M corpus with v1's stricter
+   thresholds and train Base at the v3-style extended schedule. Tests
+   the "filter first, scale second" prescription directly.
+4. **Fine-tuning study** — take the trained en-fr models into an external
+   fine-tuning repo to measure how much task-specific tuning adds on
+   top of general-domain pretraining.
+5. **Final report** — combine all runs (zh-en Base ✗, zh-en Big ✗,
+   en-fr Base v1 ✅, en-fr Big v1 tied, en-fr Base v2 underfit, en-fr
+   Base v3 converged-but-below-v1, en-fr Big v2, en-de Base, en-de Big)
+   with dedicated sections on the data-quality/quantity ablation and on
+   BLEU limitations (chrF / BLEURT / COMET cross-validation on the
+   strongest checkpoint).
 
 ## Failure Case: Base on WMT17 zh-en
 
