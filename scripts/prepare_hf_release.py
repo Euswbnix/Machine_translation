@@ -12,9 +12,10 @@ Usage:
         --out-dir hf_release/enfr_base_v1 \\
         --valid-bleu 30.00 --test-bleu 34.69
 
-Then to upload:
-    huggingface-cli login   # one-time
-    huggingface-cli upload Euswbnix/transformer-wmt14-enfr-base \\
+Then to upload (huggingface_hub>=0.25 CLI uses `hf`; older versions use
+`huggingface-cli`, which still works but prints a deprecation warning):
+    hf auth login   # one-time
+    hf upload Euswbnix/transformer-wmt14-enfr-base \\
         hf_release/enfr_base_v1 . --repo-type model
 """
 
@@ -105,7 +106,7 @@ pip install -r requirements.txt
 
 # 2. Download the weights + tokenizer from this HF repo
 pip install huggingface_hub
-huggingface-cli download Euswbnix/transformer-wmt14-enfr-base \\
+hf download Euswbnix/transformer-wmt14-enfr-base \\
     pytorch_model.bin sentencepiece.model config.json --local-dir hf_model
 
 # 3. Translate
@@ -328,8 +329,8 @@ def main():
         print(f"  {f.name:<30s} {size_mb:>8.2f} MB")
 
     print("\nNext steps:")
-    print(f"  huggingface-cli login   # one-time if not done")
-    print(f"  huggingface-cli upload Euswbnix/transformer-wmt14-enfr-base \\")
+    print(f"  hf auth login   # one-time if not done")
+    print(f"  hf upload Euswbnix/transformer-wmt14-enfr-base \\")
     print(f"      {out} . --repo-type model")
 
 
