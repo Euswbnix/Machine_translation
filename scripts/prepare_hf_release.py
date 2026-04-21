@@ -15,7 +15,7 @@ Usage:
 Then to upload (huggingface_hub>=0.25 CLI uses `hf`; older versions use
 `huggingface-cli`, which still works but prints a deprecation warning):
     hf auth login   # one-time
-    hf upload Euswbnix/transformer-wmt14-enfr-base \\
+    hf upload euswbnix/transformer-wmt14-enfr-base \\
         hf_release/enfr_base_v1 . --repo-type model
 """
 
@@ -106,7 +106,7 @@ pip install -r requirements.txt
 
 # 2. Download the weights + tokenizer from this HF repo
 pip install huggingface_hub
-hf download Euswbnix/transformer-wmt14-enfr-base \\
+hf download euswbnix/transformer-wmt14-enfr-base \\
     pytorch_model.bin sentencepiece.model config.json --local-dir hf_model
 
 # 3. Translate
@@ -167,7 +167,7 @@ If you use this checkpoint, please cite the original Transformer paper:
 ```
 
 And link back to this repo and the GitHub project:
-- HF: https://huggingface.co/Euswbnix/transformer-wmt14-enfr-base
+- HF: https://huggingface.co/euswbnix/transformer-wmt14-enfr-base
 - Code: https://github.com/Euswbnix/Machine_translation
 """
 
@@ -330,7 +330,7 @@ def main():
 
     print("\nNext steps:")
     print(f"  hf auth login   # one-time if not done")
-    print(f"  hf upload Euswbnix/transformer-wmt14-enfr-base \\")
+    print(f"  hf upload euswbnix/transformer-wmt14-enfr-base \\")
     print(f"      {out} . --repo-type model")
 
 

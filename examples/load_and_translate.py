@@ -1,7 +1,7 @@
 """Minimal end-to-end example: load a released checkpoint and translate.
 
 Works with weights hosted on HuggingFace
-(`Euswbnix/transformer-wmt14-enfr-base`) or any local averaged / best
+(`euswbnix/transformer-wmt14-enfr-base`) or any local averaged / best
 checkpoint. Run from the project root so `src/` is importable.
 
 Usage:
