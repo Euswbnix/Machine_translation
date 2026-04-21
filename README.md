@@ -3,8 +3,8 @@
 A from-scratch PyTorch implementation of the Transformer (Vaswani et al., 2017),
 trained on WMT parallel corpora without any pretrained weights.
 
-[![Base on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-Base%2060M-yellow)](https://huggingface.co/euswbnix/transformer-wmt14-enfr-base)
-[![Big on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-Big%20209M-orange)](https://huggingface.co/euswbnix/transformer-wmt14-enfr-big)
+[![en-fr Base on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--fr%20Base%2060M-yellow)](https://huggingface.co/euswbnix/transformer-wmt14-enfr-base)
+[![en-fr Big on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--fr%20Big%20209M-orange)](https://huggingface.co/euswbnix/transformer-wmt14-enfr-big)
 
 **Current status:** Transformer Base on WMT14 en-fr — **34.69 BLEU on newstest2014**
 (sacrebleu 13a, checkpoint-averaged, v1 run on 9.3M strict-filtered pairs).
