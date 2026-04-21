@@ -671,6 +671,8 @@ test BLEU even after spending 6× compute to train on them.
 
 ### Big v2: capacity is not a substitute for data quality
 
+![Big v2 en-fr training curves](assets/training_curves_big_enfr_v2.png)
+
 Big v2 was the direct capacity test: same 30M noisy corpus, same SPM,
 same schedule shape, but 3.5× the parameters (209M vs 60M). The
 question was whether a larger model could fit what Base v2 couldn't.

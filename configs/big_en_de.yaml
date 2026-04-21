@@ -1,0 +1,88 @@
+# Transformer Big — WMT14 en-de
+#
+# Big on en-de's smaller corpus (~4M clean pairs vs en-fr's 30M). Paper
+# reports Big en-de at 28.4 tokenized BLEU (~26-27 sacrebleu) — the
+# headline number for "Attention is All You Need".
+#
+# Design vs Big en-fr v2:
+#   - dropout 0.1 → 0.3 (paper's Big en-de default; smaller corpus needs
+#     more regularization — 4M pairs overfits 209M params without it)
+#   - max_steps 800K → 300K (4× less data → 4× fewer steps for same epochs)
+#   - warmup 24K → 8K (keep warmup/total ratio)
+#   - rest mirrors Big v2 (bf16, lr_scale 1.5, min_lr 1e-5, spike guard)
+#
+# Runtime estimate: ~7-9h on single 5090.
+
+model:
+  d_model: 1024
+  n_heads: 16
+  n_encoder_layers: 6
+  n_decoder_layers: 6
+  d_ff: 4096
+  dropout: 0.3
+  max_seq_len: 256
+  vocab_size: 32000
+  share_embeddings: true
+
+training:
+  batch_size: 8192
+  max_sentences: 64
+  accumulate_steps: 4
+
+  max_steps: 300000
+  warmup_steps: 8000
+  lr: 0.0007
+  lr_scale: 1.5
+  min_lr: 1.0e-5
+
+  label_smoothing: 0.1
+  clip_grad_norm: 1.0
+
+  fp16: false
+  bf16: true
+
+  seed: 42
+
+  save_interval: 10000
+  eval_interval: 20000
+  eval_interval_min: 3000
+  eval_loss_high: 4.0
+  eval_loss_low: 2.8
+  log_interval: 100
+
+  patience: 10
+  early_stopping: true
+  min_steps_before_early_stop: 120000
+  emergency_save_interval: 500
+
+  loss_spike_ratio: 1.3
+  loss_ema_alpha: 0.005
+
+data:
+  src_lang: en
+  tgt_lang: de
+  train_src: data_ende/train.clean.en
+  train_tgt: data_ende/train.clean.de
+  valid_src: data_ende/valid.en
+  valid_tgt: data_ende/valid.de
+  test_src: data_ende/test.en
+  test_tgt: data_ende/test.de
+  spm_model: data_ende/spm_ende.model
+  max_tokens: 256
+  num_workers: 4
+
+inference:
+  beam_size: 5
+  length_penalty: 1.0
+  max_decode_len: 256
+
+checkpoint:
+  dir: checkpoints/big_ende
+  keep_last: 5
+
+logging:
+  swanlab:
+    enabled: true
+    project: wmt-mt
+    experiment: big_ende
+    mode: cloud
