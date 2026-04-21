@@ -1,15 +1,24 @@
-# Transformer Big — WMT14 en-fr
-# Built on top of the Base en-fr result (BLEU 30.00 valid / 34.69 test avg).
-# Same codebase, same tokenizer, scaled up d_model/heads/ffn per Vaswani.
+# Transformer Big — WMT14 en-fr (v2: 30M corpus + v2-style step budget)
 #
-# Carried-over lessons from Big zh-en (the failed run) and Base en-fr:
-#   - bf16 (fp16 added failure axis for Big, we ruled out that risk)
-#   - 8K warmup (4K too short for Big: early LR ramp destabilized weights)
-#   - lr_scale 1.5 (safe with 8K warmup)
+# Big v1 (10M pairs, 279K steps) tied Base v1 at test 34.66 — hit the same
+# tokenizer/BLEU ceiling as Base rather than breaking through. Big v2 is
+# the capacity test on Base v2's noisier 30M data: does 209M params absorb
+# the noise that 60M couldn't? Target: match or exceed v1's 34.69 ceiling.
+#
+# v2 design vs Big v1:
+#   - data: 30M pairs (v2 loose-filter) vs Big v1's 10M strict-filter subset
+#   - max_steps 300K → 800K (3× to match 3× data, like Base v2 did)
+#   - warmup_steps 8K → 24K (keep warmup/total ratio)
+#   - dropout 0.2 → 0.1 (30M ≈ paper's 36M scale; match paper default)
+#   - save/eval intervals scaled proportionally
+#
+# Carried-over lessons (still apply):
+#   - bf16 (fp16 added a failure axis for Big, ruled out)
+#   - lr_scale 1.5 (safe with long warmup)
 #   - min_lr floor 1e-5 (prevent Noam → 0 in late training)
-#   - spike guard ratio 1.3 / EMA α 0.005 (tight — catches staircase drift)
-#   - dropout 0.2 (middle ground: paper uses 0.1 with 36M pairs,
-#                   we use 10M pairs so slightly higher insurance)
+#   - spike guard ratio 1.3 / EMA α 0.005
+#
+# Runtime estimate: ~17-20h on single 5090 (Big v1 did 279K in ~6h).
 
 model:
   d_model: 1024
@@ -17,7 +26,7 @@ model:
   n_encoder_layers: 6
   n_decoder_layers: 6
   d_ff: 4096
-  dropout: 0.2
+  dropout: 0.1
   max_seq_len: 256
   vocab_size: 32000
   share_embeddings: true
@@ -29,10 +38,8 @@ training:
   max_sentences: 64
   accumulate_steps: 4
 
-  # Schedule: 300K total matches Vaswani Big on en-fr. Wall time estimate on
-  # single 5090: ~30-40h. Resumable via Ctrl+C and --resume.
-  max_steps: 300000
-  warmup_steps: 8000
+  max_steps: 800000
+  warmup_steps: 24000
   lr: 0.0007
   lr_scale: 1.5              # peak ~7e-4, safe with 8K warmup
   min_lr: 1.0e-5
@@ -45,9 +52,9 @@ training:
 
   seed: 42
 
-  save_interval: 5000
+  save_interval: 15000
   # Adaptive eval — Big's eval is slow, so sparser than Base early on
-  eval_interval: 20000
+  eval_interval: 40000
   eval_interval_min: 3000
   eval_loss_high: 4.0
   eval_loss_low: 2.8
@@ -55,7 +62,7 @@ training:
 
   patience: 10
   early_stopping: true
-  min_steps_before_early_stop: 120000
+  min_steps_before_early_stop: 360000
   emergency_save_interval: 500
 
   # Spike guard (from Big zh-en post-mortem)
