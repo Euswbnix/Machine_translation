@@ -3,8 +3,12 @@
 A from-scratch PyTorch implementation of the Transformer (Vaswani et al., 2017),
 trained on WMT parallel corpora without any pretrained weights.
 
+[![Model on HF](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-yellow)](https://huggingface.co/euswbnix/transformer-wmt14-enfr-base)
+
 **Current status:** Transformer Base on WMT14 en-fr — **34.69 BLEU on newstest2014**
 (sacrebleu 13a, checkpoint-averaged, v1 run on 9.3M strict-filtered pairs).
+The trained checkpoint is published on HuggingFace Hub:
+[`euswbnix/transformer-wmt14-enfr-base`](https://huggingface.co/euswbnix/transformer-wmt14-enfr-base).
 See *Success Case: Base on WMT14 en-fr* below.
 
 **Full trajectory** (documented in this README as success → failure → diagnosis):
