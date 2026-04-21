@@ -1,6 +1,7 @@
 """Train a SentencePiece BPE tokenizer on the parallel corpus."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -22,8 +23,14 @@ def main():
                              "accented characters.")
     parser.add_argument("--input-sentence-size", type=int, default=10_000_000,
                         help="Max sentences sampled for BPE training.")
-    parser.add_argument("--num-threads", type=int, default=8)
+    parser.add_argument("--num-threads", type=int, default=None,
+                        help="SPM BPE training threads. Default: all CPU cores "
+                             "(os.cpu_count()). BPE has serial merges so scaling "
+                             "isn't linear — expect 1.5–2× going 8 → 32.")
     args = parser.parse_args()
+
+    num_threads = args.num_threads or (os.cpu_count() or 8)
+    print(f"Using {num_threads} threads for SPM training.")
 
     train_tokenizer(
         args.inputs,
@@ -31,7 +38,7 @@ def main():
         vocab_size=args.vocab_size,
         character_coverage=args.character_coverage,
         input_sentence_size=args.input_sentence_size,
-        num_threads=args.num_threads,
+        num_threads=num_threads,
     )
 
 
