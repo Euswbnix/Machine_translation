@@ -88,3 +88,10 @@ inference:
 checkpoint:
   dir: checkpoints/base_enfr
   keep_last: 5
+
+logging:
+  swanlab:
+    enabled: true
+    project: wmt-mt
+    experiment: base_enfr_v2
+    mode: cloud        # "cloud" uploads to swanlab.cn; use "local" to keep it offline

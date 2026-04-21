@@ -7,3 +7,4 @@ datasets>=2.14
 numpy>=1.24
 tensorboard>=2.14
 matplotlib>=3.7
+swanlab>=0.3        # optional: real-time training dashboard (config.logging.swanlab.enabled)

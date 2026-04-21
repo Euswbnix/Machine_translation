@@ -15,6 +15,13 @@ import torch.nn as nn
 from torch.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
 
+try:
+    import swanlab  # type: ignore
+    _HAS_SWANLAB = True
+except ImportError:
+    swanlab = None  # type: ignore
+    _HAS_SWANLAB = False
+
 from src.model import Transformer
 from src.data.tokenizer import Tokenizer, PAD_ID
 from src.data.dataset import create_dataloader
@@ -125,6 +132,11 @@ class Trainer:
         # Logging
         self.writer = SummaryWriter(log_dir=str(self.ckpt_dir / "logs"))
 
+        # SwanLab (optional, config-gated). Safe no-op if package not installed
+        # or config.logging.swanlab.enabled is false.
+        self.swanlab_run = None
+        self._init_swanlab(config)
+
         # Config shortcuts
         self.max_steps = train_cfg["max_steps"]
         self.accumulate_steps = train_cfg.get("accumulate_steps", 1)
@@ -171,6 +183,56 @@ class Trainer:
         # Graceful interrupt handling
         self._interrupted = False
         self._main_pid = os.getpid()
+
+    def _init_swanlab(self, config: dict):
+        """Initialize SwanLab run if enabled in config.
+
+        Config shape (all optional, defaults disable it):
+            logging:
+              swanlab:
+                enabled: true
+                project: "wmt-mt"          # default: checkpoint dir's parent name
+                experiment: "big_enfr_v2"  # default: checkpoint dir basename
+                mode: "cloud"              # "cloud" | "local" | "disabled"
+        """
+        log_cfg = (config.get("logging") or {}).get("swanlab") or {}
+        if not log_cfg.get("enabled", False):
+            return
+        if not _HAS_SWANLAB:
+            print("  [swanlab] enabled in config but package not installed — "
+                  "`pip install swanlab` to enable. Skipping.")
+            return
+
+        project = log_cfg.get("project") or self.ckpt_dir.parent.name or "mt"
+        experiment = log_cfg.get("experiment") or self.ckpt_dir.name
+        mode = log_cfg.get("mode", "cloud")
+
+        # Flatten config for the sidebar — swanlab accepts nested dict too,
+        # but flat keys are easier to scan.
+        self.swanlab_run = swanlab.init(
+            project=project,
+            experiment_name=experiment,
+            config=config,
+            mode=mode,
+        )
+        print(f"  [swanlab] logging to project='{project}' experiment='{experiment}' mode={mode}")
+
+    def _swanlab_log(self, metrics: dict, step: int):
+        """Safe wrapper: only log if a run was initialized."""
+        if self.swanlab_run is not None:
+            try:
+                swanlab.log(metrics, step=step)
+            except Exception as e:
+                # Never let a logging failure kill training.
+                print(f"  [swanlab] log failed at step {step}: {e}")
+
+    def _swanlab_finish(self):
+        if self.swanlab_run is not None:
+            try:
+                swanlab.finish()
+            except Exception as e:
+                print(f"  [swanlab] finish failed: {e}")
+            self.swanlab_run = None
 
     def _update_eval_interval(self, current_loss: float):
         """Adjust eval interval based on smoothed training loss (EMA).
@@ -275,6 +337,10 @@ class Trainer:
                         self.writer.add_scalar("train/loss", avg_loss, self.global_step)
                         self.writer.add_scalar("train/lr", lr, self.global_step)
                         self.writer.add_scalar("train/tok_per_sec", tok_per_sec, self.global_step)
+                        self._swanlab_log(
+                            {"train/loss": avg_loss, "train/lr": lr, "train/tok_per_sec": tok_per_sec},
+                            step=self.global_step,
+                        )
 
                         self.history["train_loss"].append((self.global_step, avg_loss))
                         self.history["lr"].append((self.global_step, lr))
@@ -298,6 +364,7 @@ class Trainer:
                             continue
                         print(f"Step {self.global_step:>7d} | Valid BLEU: {bleu:.2f} (next eval at {self._next_eval_step})")
                         self.writer.add_scalar("valid/bleu", bleu, self.global_step)
+                        self._swanlab_log({"valid/bleu": bleu}, step=self.global_step)
                         self.history["valid_bleu"].append((self.global_step, bleu))
 
                         if bleu > self.best_bleu:
@@ -349,6 +416,8 @@ class Trainer:
             # Restore original signal handlers
             signal.signal(signal.SIGINT, prev_sigint)
             signal.signal(signal.SIGTERM, prev_sigterm)
+            # Close SwanLab run (no-op if not initialized)
+            self._swanlab_finish()
 
     def _train_step(self, batch: dict) -> tuple[float, int]:
         """Single training step (forward + backward + optimizer step)."""
