@@ -25,8 +25,8 @@ See *Success Case: Base on WMT14 en-fr* below.
 6. ⚠️ Big on WMT14 en-fr (v2) — BLEU 33.03 test, 28.91 valid (halted at 416K of 800K,
    averaged); **below Base v2 on the same data** — 3.5× capacity actively hurts
    when the data is noisy.
-7. ✅ Base on WMT14 en-de — BLEU 24.35 valid / 24.04 test (avg-5, extended to 230K
-   with stop-on-plateau rule), matching the release threshold and closing en-de Base.
+7. ✅ Base on WMT14 en-de — BLEU 24.35 valid / 24.04 test (avg-5; best valid 24.25 @
+   214K, stopped at 230,523), matching the release threshold and closing en-de Base.
 
 Next: strict-filter en-fr v1 tokenizer-fix rerun (`character_coverage=1.0`),
 then WMT14 en-de Big, then final report.
@@ -291,7 +291,7 @@ python scripts/interactive_translate.py \
 | Big v1 (WMT14 en-fr, 10M)             | —         | 34.66     | ~6h on 5090   | 〰️ tied Base v1 (tokenizer ceiling) |
 | Base v2 (WMT14 en-fr, 30M) avg-5      | 29.23     | 33.90     | 12h 45m on 5090 | ⚠️ below v1 despite more data |
 | Big v2 (WMT14 en-fr, 30M) avg-5       | 28.91     | 33.03     | ~9h on 5090 (halted @ 416K/800K) | ⚠️ below Base v2 — capacity hurts on noisy data |
-| Base (WMT14 en-de, 4.17M) avg-5       | 24.35     | 24.04     | single 5090, extended to 230K | ✅ reached en-de Base release threshold |
+| Base (WMT14 en-de, 4.17M) avg-5       | 24.35     | 24.04     | single 5090, 230,523 steps | ✅ reached en-de Base release threshold |
 | Base (WMT17 zh-en)                    | 0.77 (plateau) | — | ~1.5 days on 5090 | ❌ mode collapse |
 | Big (WMT17 zh-en)                     | 0.47 (plateau) | — | ~1 day on 5090 (halted) | ❌ mode collapse |
 
