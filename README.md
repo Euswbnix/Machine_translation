@@ -5,6 +5,7 @@ trained on WMT parallel corpora without any pretrained weights.
 
 [![en-fr Base on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--fr%20Base%2060M-yellow)](https://huggingface.co/euswbnix/transformer-wmt14-enfr-base)
 [![en-fr Big on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--fr%20Big%20209M-orange)](https://huggingface.co/euswbnix/transformer-wmt14-enfr-big)
+[![en-de Base on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--de%20Base%2060M-olive)](https://huggingface.co/euswbnix/transformer-wmt14-ende-base)
 
 **Current status:** Transformer Base on WMT14 en-fr — **34.69 BLEU on newstest2014**
 (sacrebleu 13a, checkpoint-averaged, v1 run on 9.3M strict-filtered pairs).
@@ -24,9 +25,11 @@ See *Success Case: Base on WMT14 en-fr* below.
 6. ⚠️ Big on WMT14 en-fr (v2) — BLEU 33.03 test, 28.91 valid (halted at 416K of 800K,
    averaged); **below Base v2 on the same data** — 3.5× capacity actively hurts
    when the data is noisy.
+7. ✅ Base on WMT14 en-de — BLEU 24.35 valid / 24.04 test (avg-5, extended to 230K
+   with stop-on-plateau rule), matching the release threshold and closing en-de Base.
 
-Next: WMT14 en-de Base + Big (most-cited MT benchmark), then strict-filter en-fr
-rerun (optional), then final report.
+Next: strict-filter en-fr v1 tokenizer-fix rerun (`character_coverage=1.0`),
+then WMT14 en-de Big, then final report.
 
 ## Features
 
@@ -288,6 +291,7 @@ python scripts/interactive_translate.py \
 | Big v1 (WMT14 en-fr, 10M)             | —         | 34.66     | ~6h on 5090   | 〰️ tied Base v1 (tokenizer ceiling) |
 | Base v2 (WMT14 en-fr, 30M) avg-5      | 29.23     | 33.90     | 12h 45m on 5090 | ⚠️ below v1 despite more data |
 | Big v2 (WMT14 en-fr, 30M) avg-5       | 28.91     | 33.03     | ~9h on 5090 (halted @ 416K/800K) | ⚠️ below Base v2 — capacity hurts on noisy data |
+| Base (WMT14 en-de, 4.17M) avg-5       | 24.35     | 24.04     | single 5090, extended to 230K | ✅ reached en-de Base release threshold |
 | Base (WMT17 zh-en)                    | 0.77 (plateau) | — | ~1.5 days on 5090 | ❌ mode collapse |
 | Big (WMT17 zh-en)                     | 0.47 (plateau) | — | ~1 day on 5090 (halted) | ❌ mode collapse |
 
@@ -763,34 +767,23 @@ sense once a clean Base result exceeds v1's 34.69.
 
 ### Roadmap (updated)
 
-Big v2 completed (halted early, 33.03 test). Data-quality/capacity
-ablation is now closed. Remaining items:
+Big v2 and en-de Base are now completed. Remaining items:
 
-1. **WMT14 en-de Base + Big** — the most-cited MT benchmark,
-   apples-to-apples with the literature. Paper reports Base 27.3, Big
-   28.4 (tokenized); sacrebleu equivalent ~25-26 / 26-27. Data pipeline
-   scripts (`scripts/download_wmt_ende.py`, `scripts/clean_data_ende.py`)
-   are in place; en-de's raw corpus is ~4.5M pairs, much smaller than
-   en-fr's 40M, so the Base v1 schedule (≈50-60K steps) should be a
-   fair starting point.
-2. **Strict-filter en-fr rerun (optional)** — re-clean the 40M corpus
-   with v1's stricter thresholds and train Base at v2's extended
-   schedule. Tests the "filter first, scale second" prescription
-   directly. Only worth doing if en-de doesn't produce a strong enough
-   result to close out the en-fr story.
-3. **Release v1 to HuggingFace Hub** — Base v1 (34.69 test) is the
-   strongest checkpoint in the project and the one worth sharing
-   externally. Upload with tokenizer + model card + minimal
-   `load_and_translate.py` example.
-4. **Fine-tuning study** — take the trained en-fr models into an
-   external fine-tuning repo to measure how much task-specific tuning
-   adds on top of general-domain pretraining.
-5. **Final report** — combine all runs (zh-en Base ✗, zh-en Big ✗,
+1. **Strict-filter en-fr v1 rerun (tokenizer fix, priority next)** — keep
+   the original 9.3M strict-filter setup, retrain SentencePiece with
+   `character_coverage=1.0`, and rerun Base to remove the `<unk>` ceiling
+   from accented French tokens.
+2. **WMT14 en-de Big** — same benchmark family as the completed en-de Base;
+   test whether added capacity can move from ~24 sacrebleu into the
+   paper-equivalent band.
+3. **Fine-tuning study** — take the trained en-fr/en-de models into an
+   external fine-tuning repo to measure task-specific gains on top of
+   general-domain MT pretraining.
+4. **Final report** — combine all runs (zh-en Base ✗, zh-en Big ✗,
    en-fr Base v1 ✅, en-fr Big v1 tied, en-fr Base v2 converged-but-
-   below-v1, en-fr Big v2 below-Base-v2, en-de Base, en-de Big) with
-   dedicated sections on the data-quality/quantity/capacity ablation
-   and on BLEU limitations (chrF / BLEURT / COMET cross-validation on
-   the strongest checkpoint).
+   below-v1, en-fr Big v2 below-Base-v2, en-de Base ✅, en-de Big) with
+   dedicated sections on data-quality/quantity/capacity ablations and BLEU
+   limitations (chrF / BLEURT / COMET cross-validation on strongest checkpoints).
 
 ## Failure Case: Base on WMT17 zh-en
 
