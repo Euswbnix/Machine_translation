@@ -636,6 +636,11 @@ class Trainer:
         lines.append(f"Total steps:     {self.global_step:,}")
         lines.append(f"Training time:   {elapsed_str}")
         lines.append(f"Best BLEU:       {self.best_bleu:.2f}")
+        spike_ratio_cfg = train_cfg.get("loss_spike_ratio", 1.3)
+        lines.append(
+            f"Spike-guard skips: {self._skip_count} "
+            f"(ratio={spike_ratio_cfg}, EMA α={self._loss_ema_alpha})"
+        )
         lines.append("")
 
         # Model config
