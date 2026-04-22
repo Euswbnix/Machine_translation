@@ -726,21 +726,24 @@ dataset":
 
 | Run | Spike-guard triggers |
 |-----|----------------------|
-| Base v1 (9.3M strict-filter) | **0** |
-| Base v2 (30M loose-filter)   | ≥1 (observed live; exact count unlogged) |
-| Big v2  (30M loose-filter)   | ≥1 (observed live; exact count unlogged) |
+| Base v1 (9.3M strict-filter) | **0** (100K steps) |
+| Base v2 (30M loose-filter)   | ≥1 (live-observed; log not retained) |
+| Big v2  (30M loose-filter)   | **12** (416K steps, from swanlab log) |
 
 v1's zero-trigger count is the strong signal: across 100K training
-steps, not one batch produced a loss >1.3× of the running average. On
-v2's 30M corpus, guards fire occasionally during both Base and Big
-runs. Since the threshold is an EMA of the *same model's own loss*, it
-corrects for model capability — the absolute trigger rate is a
-property of the data, not the architecture. **The extra 20M pairs in
-v2 contain pathological samples that the strict-filter 9.3M does not.**
+steps, not one batch produced a loss >1.3× of the running average. Big
+v2's 12 triggers over 416K steps (≈ 1 per 35K steps) are not an
+emergency per run, but they are qualitatively impossible on v1's data
+— the corpus simply doesn't contain batches that loss-spike a
+competent model. Since the threshold is an EMA of the *same model's
+own loss*, it corrects for model capability — the absolute trigger
+rate is a property of the data, not the architecture. **The extra 20M
+pairs in v2 contain pathological samples that the strict-filter 9.3M
+does not.**
 
-(Future runs will log trigger counts to the training report directly;
-current evidence is limited to live stdout observation because the
-counter wasn't persisted.)
+(Base v2's exact trigger count is lost because its run predates stdout
+log retention; triggers were observed live during training. Big v2's
+12 is from the retained swanlab log.)
 
 ### Combined prescription
 
