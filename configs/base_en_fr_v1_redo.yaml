@@ -1,0 +1,87 @@
+# Transformer Base — WMT14 en-fr v1 REDO (tokenizer-fix rerun)
+#
+# Purpose: reproduce v1 (9.3M strict-filter, 100K steps) with SPM
+# character_coverage=1.0 to close the ~4.4% accent-UNK tax (`Israël` →
+# `Isra⁇l`). Everything else matches the original v1 exactly, so the
+# BLEU delta attributable to the tokenizer fix is isolated.
+#
+# Expected: averaged test 34.9-35.2 (original 34.69 + 0.3-0.5 recovered
+# from removed UNK tax). If it lands below 34.9 the tokenizer cost was
+# overestimated and README must say so.
+#
+# Replaces v1 on HuggingFace (same repo name) once the number is in hand.
+
+model:
+  d_model: 512
+  n_heads: 8
+  n_encoder_layers: 6
+  n_decoder_layers: 6
+  d_ff: 2048
+  dropout: 0.1
+  max_seq_len: 256
+  vocab_size: 32000
+  share_embeddings: true
+
+training:
+  batch_size: 24576
+  max_sentences: 192
+  accumulate_steps: 4
+
+  # v1 original schedule, not v2 extended
+  max_steps: 100000
+  warmup_steps: 4000
+  lr: 0.0007
+  lr_scale: 1.0
+  min_lr: 1.0e-5
+
+  label_smoothing: 0.1
+  clip_grad_norm: 1.0
+
+  fp16: false
+  bf16: true
+
+  seed: 42
+
+  save_interval: 5000
+  eval_interval: 10000
+  eval_interval_min: 2000
+  eval_loss_high: 4.0
+  eval_loss_low: 2.8
+  log_interval: 100
+
+  patience: 10
+  early_stopping: true
+  min_steps_before_early_stop: 40000
+  emergency_save_interval: 500
+
+  loss_spike_ratio: 1.3
+  loss_ema_alpha: 0.005
+
+data:
+  src_lang: en
+  tgt_lang: fr
+  train_src: data_enfr_v1/train.clean.en
+  train_tgt: data_enfr_v1/train.clean.fr
+  valid_src: data_enfr_v1/valid.en
+  valid_tgt: data_enfr_v1/valid.fr
+  test_src: data_enfr_v1/test.en
+  test_tgt: data_enfr_v1/test.fr
+  spm_model: data_enfr_v1/spm_enfr_v1_fixed.model
+  max_tokens: 256
+  num_workers: 4
+
+inference:
+  beam_size: 5
+  length_penalty: 1.0
+  max_decode_len: 256
+
+checkpoint:
+  dir: checkpoints/base_enfr_v1_redo
+  keep_last: 5
+
+logging:
+  swanlab:
+    enabled: true
+    project: wmt-mt
+    experiment: base_enfr_v1_redo
+    mode: cloud
