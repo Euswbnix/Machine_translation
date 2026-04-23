@@ -27,9 +27,11 @@ See *Success Case: Base on WMT14 en-fr* below.
    when the data is noisy.
 7. ✅ Base on WMT14 en-de — BLEU 24.35 valid / 24.04 test (avg-5; best valid 24.25 @
    214K, stopped at 230,523), matching the release threshold and closing en-de Base.
+8. ⚠️ Big on WMT14 en-de — BLEU 23.01 valid / 22.47 test (avg-5 @ ~466K), below
+   en-de Base despite larger capacity and longer training.
 
 Next: strict-filter en-fr v1 tokenizer-fix rerun (`character_coverage=1.0`),
-then WMT14 en-de Big, then final report.
+then fine-tuning study, then final report.
 
 ## Features
 
@@ -292,6 +294,7 @@ python scripts/interactive_translate.py \
 | Base v2 (WMT14 en-fr, 30M) avg-5      | 29.23     | 33.90     | 12h 45m on 5090 | ⚠️ below v1 despite more data |
 | Big v2 (WMT14 en-fr, 30M) avg-5       | 28.91     | 33.03     | ~9h on 5090 (halted @ 416K/800K) | ⚠️ below Base v2 — capacity hurts on noisy data |
 | Base (WMT14 en-de, 4.17M) avg-5       | 24.35     | 24.04     | single 5090, 230,523 steps | ✅ reached en-de Base release threshold |
+| Big (WMT14 en-de, 4.17M) avg-5        | 23.01     | 22.47     | single 5090, ~466K steps | ⚠️ below en-de Base — capacity did not pay off |
 | Base (WMT17 zh-en)                    | 0.77 (plateau) | — | ~1.5 days on 5090 | ❌ mode collapse |
 | Big (WMT17 zh-en)                     | 0.47 (plateau) | — | ~1 day on 5090 (halted) | ❌ mode collapse |
 
@@ -767,21 +770,18 @@ sense once a clean Base result exceeds v1's 34.69.
 
 ### Roadmap (updated)
 
-Big v2 and en-de Base are now completed. Remaining items:
+Big v2, en-de Base, and en-de Big are now completed. Remaining items:
 
 1. **Strict-filter en-fr v1 rerun (tokenizer fix, priority next)** — keep
    the original 9.3M strict-filter setup, retrain SentencePiece with
    `character_coverage=1.0`, and rerun Base to remove the `<unk>` ceiling
    from accented French tokens.
-2. **WMT14 en-de Big** — same benchmark family as the completed en-de Base;
-   test whether added capacity can move from ~24 sacrebleu into the
-   paper-equivalent band.
-3. **Fine-tuning study** — take the trained en-fr/en-de models into an
+2. **Fine-tuning study** — take the trained en-fr/en-de models into an
    external fine-tuning repo to measure task-specific gains on top of
    general-domain MT pretraining.
-4. **Final report** — combine all runs (zh-en Base ✗, zh-en Big ✗,
+3. **Final report** — combine all runs (zh-en Base ✗, zh-en Big ✗,
    en-fr Base v1 ✅, en-fr Big v1 tied, en-fr Base v2 converged-but-
-   below-v1, en-fr Big v2 below-Base-v2, en-de Base ✅, en-de Big) with
+   below-v1, en-fr Big v2 below-Base-v2, en-de Base ✅, en-de Big ⚠️) with
    dedicated sections on data-quality/quantity/capacity ablations and BLEU
    limitations (chrF / BLEURT / COMET cross-validation on strongest checkpoints).
 
