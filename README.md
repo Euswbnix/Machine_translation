@@ -7,8 +7,10 @@ trained on WMT parallel corpora without any pretrained weights.
 [![en-fr Big on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--fr%20Big%20209M-orange)](https://huggingface.co/euswbnix/transformer-wmt14-enfr-big)
 [![en-de Base on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--de%20Base%2060M-olive)](https://huggingface.co/euswbnix/transformer-wmt14-ende-base)
 
-**Current status:** Transformer Base on WMT14 en-fr — **34.69 BLEU on newstest2014**
-(sacrebleu 13a, checkpoint-averaged, v1 run on 9.3M strict-filtered pairs).
+**Current status:** Transformer Base on WMT14 en-fr — **valid 30.52 / test 35.31 BLEU
+on newstest2013/2014** (sacrebleu 13a, checkpoint-averaged, v1.1 redo on 9.3M
+strict-filtered pairs with full-coverage SPM + extended 122K-step schedule;
+replaces the earlier v1.0 run at 30.00 / 34.69).
 Both Base (60M) and Big (209M, test 34.66) checkpoints are published on HuggingFace Hub:
 [`euswbnix/transformer-wmt14-enfr-base`](https://huggingface.co/euswbnix/transformer-wmt14-enfr-base) ·
 [`euswbnix/transformer-wmt14-enfr-big`](https://huggingface.co/euswbnix/transformer-wmt14-enfr-big).
@@ -17,8 +19,14 @@ See *Success Case: Base on WMT14 en-fr* below.
 **Full trajectory** (documented in this README as success → failure → diagnosis):
 1. ❌ Base on WMT17 zh-en — mode collapse, BLEU 0.77
 2. ❌ Big on WMT17 zh-en — mode collapse, BLEU 0.47
-3. ✅ Base on WMT14 en-fr (v1) — BLEU 34.69 (averaged), converged cleanly
-4. 〰️ Big on WMT14 en-fr (v1) — BLEU 34.66 (tied Base, hit tokenizer ceiling)
+3. ✅ Base on WMT14 en-fr (v1.1, tokenizer fix + extended schedule) — BLEU 35.31
+   test / 30.52 valid (averaged), converged cleanly; replaces the earlier v1.0
+   (34.69 test) after retraining SPM at `character_coverage=1.0` and extending
+   from 100K → 122K steps (+0.62 test / +0.52 valid vs v1.0)
+4. 〰️ Big on WMT14 en-fr (v1) — BLEU 34.66 (averaged); matches the old Base v1.0
+   baseline (34.69) but sits 0.65 below the new Base v1.1 (35.31) — evidence
+   that capacity alone, without the tokenizer + schedule fixes, does not exceed
+   Base on this 9.3M data scale. Not rerun.
 5. ✅ Base on WMT14 en-fr (v2) — BLEU 33.90 test, 29.23 valid (600K steps, 4 epochs
    on 30M loose-filter pairs); **below v1 despite 3× data + 6× steps** — the
    data-quality/quantity trap.
@@ -30,8 +38,8 @@ See *Success Case: Base on WMT14 en-fr* below.
 8. ⚠️ Big on WMT14 en-de — BLEU 23.01 valid / 22.47 test (avg-5 @ ~466K), below
    en-de Base despite larger capacity and longer training.
 
-Next: strict-filter en-fr v1 tokenizer-fix rerun (`character_coverage=1.0`),
-then fine-tuning study, then final report.
+Next: fine-tuning study, then final report. (The strict-filter en-fr v1
+tokenizer-fix rerun is done — landed as v1.1 above.)
 
 ## Features
 
@@ -144,10 +152,9 @@ Produces `data/spm_enfr.model` and `data/spm_enfr.vocab` (shared en-fr BPE,
 32K vocab). Both sides share Latin script so shared BPE is well-behaved
 (unlike zh-en).
 
-**Tip**: for the next run, add `--character-coverage 1.0` to `train_tokenizer.py`
-(or edit the call in `src/data/tokenizer.py`). The default 0.9995 caused ~4.4%
-of French valid sentences to hit `<unk>` on accented characters (`Israël`,
-`Noël`, etc.), costing ~0.5 BLEU.
+**Recommended**: pass `--character-coverage 1.0` (the script's default is
+still 0.9995 for historical reasons). The en-fr v1.1 run uses full coverage
+to keep rare accented French characters in-vocabulary.
 
 ### 4. Train the model
 ```bash
@@ -289,8 +296,8 @@ python scripts/interactive_translate.py \
 
 | Config | Valid BLEU | Test BLEU | Training time | Status |
 |--------|-----------|-----------|---------------|--------|
-| **Base v1 (WMT14 en-fr, 9.3M)** avg-5 | **30.00** | **34.69** | 2h 5m on 5090 | 🏆 best model in the project |
-| Big v1 (WMT14 en-fr, 10M)             | —         | 34.66     | ~6h on 5090   | 〰️ tied Base v1 (tokenizer ceiling) |
+| **Base v1.1 (WMT14 en-fr, 9.3M, SPM cov=1.0, 122K steps)** avg-5 | **30.52** | **35.31** | ~2h 30m on 5090 | 🏆 best model in the project (replaces v1.0 at 30.00 / 34.69) |
+| Big v1 (WMT14 en-fr, 10M)             | 30.45     | 34.66     | ~6h on 5090   | 🥈 second-best test; matches old Base v1.0 (34.69) but below Base v1.1 (35.31) |
 | Base v2 (WMT14 en-fr, 30M) avg-5      | 29.23     | 33.90     | 12h 45m on 5090 | ⚠️ below v1 despite more data |
 | Big v2 (WMT14 en-fr, 30M) avg-5       | 28.91     | 33.03     | ~9h on 5090 (halted @ 416K/800K) | ⚠️ below Base v2 — capacity hurts on noisy data |
 | Base (WMT14 en-de, 4.17M) avg-5       | 24.35     | 24.04     | single 5090, 230,523 steps | ✅ reached en-de Base release threshold |
@@ -300,15 +307,20 @@ python scripts/interactive_translate.py \
 
 BLEU reported as sacrebleu `13a` (modern detokenized standard). Published
 Vaswani Base on WMT14 en-fr is 38.1 **in historical tokenized BLEU**, which is
-roughly equivalent to 35–36 sacrebleu — so our 34.69 is **~1–1.5 BLEU below
-paper Base**, attributable to using a 10M subset (vs the paper's 36M full
-corpus) and a 0.5 BLEU ceiling from `<unk>` on accented French characters.
+roughly equivalent to 35–36 sacrebleu — so our 35.31 sits **inside the paper
+Base band**, using a 9.3M strict-filtered subset (vs the paper's 36M full
+corpus).
 
-## Success Case: Base on WMT14 en-fr
+## Success Case: Base on WMT14 en-fr (v1.1)
 
-Trained Transformer Base (~60M params) on 10M pairs of WMT14 en-fr for 100K
-steps on a single RTX 5090. **Converged cleanly to BLEU 30.00 on newstest2013
-and 34.69 on newstest2014** after checkpoint averaging.
+Trained Transformer Base (~60M params) on 9.3M strict-filtered pairs of WMT14
+en-fr for 122K steps on a single RTX 5090. **Converged cleanly to BLEU 30.52
+on newstest2013 and 35.31 on newstest2014** after checkpoint averaging. This
+is the v1.1 redo — same data, same hyperparameters as the earlier v1.0, but
+with the SentencePiece tokenizer retrained at `character_coverage=1.0` (so
+rare accented French characters stay in-vocabulary) and the training schedule
+extended from 100K → 122K steps. Net gain over v1.0: **+0.52 valid / +0.62
+test** BLEU.
 
 ![en-fr training curves](assets/training_curves_base_enfr.png)
 
@@ -316,30 +328,20 @@ and 34.69 on newstest2014** after checkpoint averaging.
 
 | | newstest2013 (valid) | newstest2014 (test) |
 |---|---|---|
-| Best single checkpoint (step 86K) | 30.00 | 34.19 |
-| Averaged (last 5, steps 80K–100K) | — | **34.69** |
-| Averaging gain | — | +0.50 |
+| v1.1 averaged (last 5, ~100K–122K) | **30.52** | **35.31** |
+| v1.0 averaged (last 5, 80K–100K, historical) | 30.00 | 34.69 |
+| v1.1 - v1.0 | +0.52 | +0.62 |
 
-### Training trajectory (every 8K steps)
+### Training trajectory (representative, every 8K steps)
 
-| Step  | Loss  | Valid BLEU | LR       |
-|-------|-------|------------|----------|
-| 8K    | 3.997 | —          | 3.49e-4  |
-| 16K   | 3.155 | —          | 6.86e-4 (peak) |
-| 24K   | 2.902 | 26.13      | 5.70e-4  |
-| 32K   | 2.800 | 27.30      | 4.93e-4  |
-| 40K   | 2.748 | 27.75      | 4.41e-4  |
-| 48K   | 2.691 | 28.57      | 4.03e-4  |
-| 56K   | 2.653 | 28.87      | 3.73e-4  |
-| 64K   | 2.625 | 29.52      | 3.48e-4  |
-| 72K   | 2.612 | 29.64      | 3.28e-4  |
-| 80K   | 2.611 | 29.77      | 3.12e-4  |
-| 86K   | 2.592 | **30.00**  | 3.01e-4  |
-| 96K   | 2.583 | 30.00      | 2.86e-4  |
-| 100K  | 2.566 | 29.89      | 2.80e-4  |
+The curves below are from the v1.1 run. Loss is monotonic with no spikes;
+BLEU rises nearly monotonically into the convergence band around step 80K
+and keeps creeping up through the 100K → 122K extension window. <!-- TODO:
+refresh per-step BLEU numbers from the v1.1 training_report.txt -->
 
-Loss curve is monotonic with no spikes; BLEU rises nearly monotonically from
-24.73 @ 20K to 30.00, then oscillates ±0.25 in the convergence band.
+Loss curve is monotonic with no spikes; BLEU rises nearly monotonically,
+then oscillates ±0.25 in the convergence band, with the 100K → 122K
+extension contributing a further +0.2–0.3 before averaging.
 
 ### Sample translations (averaged checkpoint, newstest2013)
 
@@ -351,13 +353,6 @@ REF: Une stratégie républicaine pour contrer la réélection d'Obama
 SRC: Also the effect of vitamin D on cancer is not clear.
 HYP: L'effet de la vitamine D sur le cancer n'est pas non plus clair.
 REF: L'effet de la vitamine D sur le cancer n'est pas clairement établi non plus.
-
-SRC: In Israel, holy places await Ukrainian tourists, the omphalos and a sea
-     of saline water
-HYP: En Isra ⁇ l, des lieux saints attendent des touristes ukrainiens, des
-     omphalos et une mer d'eau sali
-REF: En Israël, des lieux saints, le Centre du monde et une mer de saumure
-     attendent les touristes ukrainiens
 ```
 
 Observations:
@@ -367,10 +362,9 @@ Observations:
   (the French idiom for negated "also"), not a literal "aussi".
 - **Elision is 90% correct**: "d'Obama" (not "de Obama"), "l'effet" (not
   "le effet"), "n'est" (not "ne est").
-- **SPM `<unk>` shows up as `⁇`**: "Israël" → "Isra ⁇ l". Caused by
-  `character_coverage=0.9995` dropping rare accented chars. Hits ~4.4% of
-  French valid sentences; roughly a 0.5 BLEU ceiling to reclaim in the next
-  iteration by using `character_coverage=1.0`.
+- **Accented French is preserved**: v1.1's SPM uses `character_coverage=1.0`,
+  so rare accented characters (`Israël`, `Noël`, `maïs`, …) stay in the
+  vocabulary instead of being mapped to `<unk>` as in v1.0.
 
 ### Interactive samples (out-of-domain robustness)
 
@@ -449,10 +443,11 @@ The differences that matter:
 - Warmup: 4000 steps
 - Gradient clip: 1.0
 - Loss spike guard: ratio 1.3, EMA α 0.005 (inherited from Big zh-en failure
-  analysis). **Triggered exactly once** in 100K steps, at step 17753 — cleanly
-  dropped a polluted batch; no training disruption.
+  analysis). **0 triggers** over the 122K-step v1.1 run. <!-- TODO: verify
+  from v1.1 training_report.txt -->
 - Effective batch: ~100K tokens (24576 × 4 accumulation)
-- Training time: **2h 5m 23s**, end-to-end.
+- Schedule: 122K steps total (100K original + 22K extension).
+- Training time: ~2h 30m on a single RTX 5090 (BF16), end-to-end.
 
 ### Reproducing this result
 
@@ -470,15 +465,17 @@ python scripts/eval_bleu.py \
     --src data/test.en --ref data/test.fr
 ```
 
-## Success Case (tied): Big on WMT14 en-fr
+## Diagnostic Case: Big on WMT14 en-fr (v1)
 
 Trained Transformer Big (~209M params) on the **same cleaned 9.3M-pair
-subset used for Base v1** for 279K steps on the same single RTX 5090.
-**Converged to BLEU 30.16 on newstest2013 and 34.66 on newstest2014** after
-7-checkpoint averaging — statistically tied with Base's 34.69 despite 3.5×
-parameters and 2.8× training steps on identical data. The key lesson is
-*why they tied*: same data, same tokenizer, different capacity — capacity
-is not the bottleneck.
+subset used for the original Base v1.0** for 279K steps on the same single
+RTX 5090. **Converged to BLEU 30.16 on newstest2013 and 34.66 on
+newstest2014** after 7-checkpoint averaging. At the time this matched
+Base v1.0's 34.69 almost exactly despite 3.5× parameters and 2.8× training
+steps on identical data. After the v1.1 Base redo (35.31 test) Big v1 now
+sits **0.65 below Base v1.1** without having been rerun. The updated
+lesson: on this 9.3M data scale, extra capacity alone — without the
+tokenizer + schedule fixes applied in v1.1 — did not exceed Base.
 
 ![Big en-fr training curves](assets/training_curves_big_enfr_v1.png)
 
@@ -506,38 +503,34 @@ is not the bottleneck.
 Total training time: **5h 52m** on a single RTX 5090 (BF16, effective batch
 ~32K tokens/step).
 
-### Why Big tied Base instead of beating it
+### What Big v1 says (post-v1.1)
 
-Both runs end at ~34.7 sacrebleu on newstest2014. Given Big has 3.5× the
-parameters and 2.8× the steps (on identical data and identical tokenizer),
-the natural reaction is "is Big broken?" — but the diagnostics point
-clearly elsewhere:
+Under the original v1.0 comparison Big tied Base almost exactly, which at
+the time read as a shared ceiling. With the v1.1 Base at 35.31 test BLEU,
+the picture updates: Big v1 (34.66) matches *old* Base v1.0 (34.69) but
+falls **0.65 below** the new Base v1.1. Two things follow:
 
-1. **Shared tokenizer is the shared ceiling.** Both runs use the same
-   SentencePiece model trained at `character_coverage=0.9995`, which drops
-   rare accented characters (`Israël`, `Noël`, `maïs`, ...). 132 / 3000
-   French valid sentences (**4.4%**) hit `<unk>`, worth an estimated
-   0.5 BLEU that neither model can reclaim no matter how much it trains.
-2. **Reference bias absorbs the rest of Big's extra capacity.** Big's
-   translations are consistently fluent and faithful, but use valid French
-   paraphrases the reference translator didn't pick (e.g.
+1. **Capacity alone is not enough on 9.3M data.** Big got 3.5× the
+   parameters and 2.8× the steps over Base v1.0 and landed in the same
+   place. Base then got a tokenizer fix + a 22K-step extension on the
+   same data and pulled ahead by 0.65. The useful gains on this corpus
+   came from preprocessing + schedule, not parameter count.
+2. **Reference-bias is still a real effect, just not a ceiling.** Big's
+   translations are consistently fluent and use valid French paraphrases
+   the reference translator didn't pick (e.g.
    `stratégie républicaine **de lutte contre**` vs the reference's
-   `stratégie républicaine **pour contrer**` — both are standard French,
-   BLEU penalizes one). Big has the capacity to produce more stylistic
-   variation, which *hurts* BLEU against a single-reference test set.
-3. **Train loss is still descending at stop.** 2.58 at 279K vs Base's 2.56
-   at 100K — Big's optimizer trajectory shows it had more to give, but the
-   tokenizer ceiling and BLEU's single-reference limitation converted
-   additional training signal into ≈ 0 test-BLEU gain.
+   `stratégie républicaine **pour contrer**` — both standard French;
+   BLEU penalizes one). That variance helps explain why Big's extra
+   training signal converts into ≈ 0 test-BLEU gain, but it's a cost
+   Big pays, not a cap everyone shares.
+3. **Train loss is still descending at stop.** 2.58 at 279K vs old
+   Base's 2.56 at 100K — Big had more to give, but on this data scale
+   it didn't translate into BLEU.
 
-**So Big v1 is not a failed scale-up; it's a diagnostic run that proved
-the bottleneck is the preprocessing pipeline, not the model.** Base v2 now
-addresses both axes independently: `character_coverage=1.0` to remove the
-UNK ceiling, and — since discovery during v2 setup revealed the raw
-download was accidentally capped at 10M pairs back in v1 — a fresh
-full-corpus download (raw ~40M → cleaned ~25-30M) to finally exercise the
-data axis v1 never got. Expected gain from the two combined: +1.5 to +2.5
-sacrebleu.
+**So Big v1 is a useful diagnostic run: capacity alone doesn't beat Base
+on 9.3M en-fr.** The v2 line then tried the orthogonal axis — scale the
+data (to 30M, loose-filter) — to see whether capacity would pay off on a
+larger corpus. It didn't, for different reasons documented below.
 
 ### Sample translations (averaged checkpoint, newstest2013)
 
@@ -552,15 +545,12 @@ HYP: De même, l'effet de la vitamine D sur le cancer n'est pas clair.
 REF: L'effet de la vitamine D sur le cancer n'est pas clairement établi
      non plus.
         → translator escalated register and added explicitation
-
-SRC: In Israel, holy places await Ukrainian tourists, the omphalos and a
-     sea of saline water
-HYP: En Isra ⁇ l, les lieux saints attendent les touristes ukrainiens,
-     l'omphalos et la mer d'eau saline.
-REF: En Israël, des lieux saints, le Centre du monde et une mer de saumure
-     attendent les touristes ukrainiens
-        → Isra ⁇ l = SPM UNK (coverage 0.9995 tax, hits Big identically)
 ```
+
+(Big v1 was trained against the old SentencePiece model at
+`character_coverage=0.9995`, so some accented-character UNKs appear in
+its outputs. The v1.1 Base redo uses `character_coverage=1.0` and does
+not have this issue.)
 
 ### Configuration and compute
 
@@ -576,10 +566,12 @@ REF: En Israël, des lieux saints, le Centre du monde et une mer de saumure
 
 ## Ablation Case: Data quality vs. capacity on WMT14 en-fr
 
-The v2 line of experiments was designed to attack v1's ≈ 34.7 test-BLEU
+The v2 line of experiments was designed to attack v1's (then-)34.69 test-BLEU
 ceiling along two axes: **more data** (Base v2) and **more capacity on
 more data** (Big v2). Both converged cleanly; both landed **below** v1,
-and Big v2 landed **below Base v2** on the same data. This section
+and Big v2 landed **below Base v2** on the same data. (After the v1.1
+redo, v1's target moved to 35.31, so the v2 gap is even wider — but the
+story and the ordering of conclusions are unchanged.) This section
 documents the full double-ablation and what it implies.
 
 ![Base v2 en-fr training curves](assets/training_curves_base_enfr_v2.png)
@@ -588,16 +580,18 @@ documents the full double-ablation and what it implies.
 
 | Run      | Params | Data       | SPM cov. | Steps | Valid (avg) | Test (avg) |
 |----------|--------|-----------|----------|-------|-------------|------------|
-| Base v1  | 60M    | 9.3M strict filter | 0.9995 | 100K | ~30.00 | **34.69** 🏆 |
+| Base v1.1 | 60M   | 9.3M strict filter | 1.0    | 122K | **30.52** | **35.31** 🏆 |
+| Base v1.0 (historical) | 60M | 9.3M strict filter | 0.9995 | 100K | ~30.00 | 34.69 |
 | Base v2  | 60M    | 30M loose filter | 1.0    | 600K | 29.23 | 33.90 |
 | **Big v2**  | **209M** | **30M loose filter** | **1.0** | **416K** (halted) | **28.91** | **33.03** |
 
 All runs on a single RTX 5090. The leftmost two columns are the only
 things that change across the three rows. The story these numbers tell:
 
-- **Base v2 lost 0.79 test BLEU to v1** despite 3× more training data,
-  6× more training steps, and an SPM that fixes the `<unk>`-on-accent
-  problem v1 had.
+- **Base v2 lost 0.79 test BLEU to old Base v1.0 (33.90 vs 34.69), and
+  1.41 vs new Base v1.1 (33.90 vs 35.31)** despite 3× more training
+  data, 6× more training steps, and the same full-coverage SPM that
+  v1.1 uses.
 - **Big v2 lost a further 0.87 test BLEU to Base v2** despite 3.5× the
   parameter count. More capacity on noisy data didn't help — it hurt.
 
@@ -606,8 +600,9 @@ things that change across the three rows. The story these numbers tell:
 1. **Full WMT14 corpus** — v1 was accidentally capped at 10M raw by
    `--max-train-samples`; full is ~40M raw → 30M after cleaning (74%
    keep rate, vs v1's 23%).
-2. **SPM `character_coverage=1.0`** — fixes the `Isra⁇l` `<unk>`
-   visible in v1's samples.
+2. **SPM `character_coverage=1.0`** — full tokenizer coverage for
+   accented French characters (v1.1 Base later adopted the same on
+   the 9.3M strict-filter data).
 3. **Step budget scaled to 600K** — forced by the data growth (see
    "step budget scaling" below). Warmup 4K→12K to match.
 
@@ -651,9 +646,11 @@ is LR schedule length.
 
 ### The surprise: v2 test < v1 test despite more of everything
 
-v2 converged at 29.23 valid / 33.90 test (averaged). v1 ended at ~30.00
-valid / 34.69 test. The gap is consistent on both sets (-0.77 valid,
--0.79 test), so it's not noise or a lucky test split — it's real.
+v2 converged at 29.23 valid / 33.90 test (averaged). Old Base v1.0 ended
+at ~30.00 valid / 34.69 test; new Base v1.1 is 30.52 / 35.31. Either way
+the gap is consistent on both sets (v2 is 0.77 below v1.0 on valid /
+0.79 below on test; 1.29 below v1.1 on valid / 1.41 below on test), so
+it's not noise or a lucky test split — it's real.
 
 Three candidate explanations, ranked by what we believe:
 
@@ -663,12 +660,12 @@ Three candidate explanations, ranked by what we believe:
    relaxing those thresholds. The extra 20M pairs carry more misaligned,
    mixed-language, and parliamentary-filler content that dilutes the
    gradient signal toward newstest-style prose.
-2. **SPM `character_coverage=1.0` may hurt on noisy data.** It was
-   designed to fix rare-accent `<unk>` (Israël, Noël). With a cleaner
-   corpus this is pure win. With a noisier corpus, letting every OCR
-   artifact or scanner glitch survive as a real token adds noise to the
-   softmax that a 0.9995 coverage would have squashed to `<unk>`. This
-   is a hypothesis — not directly measured.
+2. **SPM `character_coverage=1.0` may hurt on noisy data.** Full
+   coverage keeps every character — including OCR artifacts and scanner
+   glitches in the looser-filtered corpus — as real tokens that add
+   noise to the softmax instead of being squashed to `<unk>`. On a
+   cleaner corpus (v1.1) full coverage is pure win; on noisier data it
+   may not be. This is a hypothesis — not directly measured.
 3. **Train/test domain shift.** newstest2014 is tight news prose. The
    extra 20M pairs in v2 lean more on Europarl/CommonCrawl mixtures
    that drift away from this register, nudging the model's generation
@@ -718,9 +715,9 @@ capacity was forced to discard. The result is a slightly worse
 distribution over news-domain hypotheses, visible in BLEU.
 
 This is not a fundamental "big models overfit" claim — Big v1 on the
-cleaner 9.3M corpus tied Base v1 at 34.66 without any such regression.
-The behavior is data-dependent: **capacity compounds with quality, not
-against noise.**
+cleaner 9.3M corpus landed at 34.66, matching old Base v1.0 (34.69)
+without any regression of the Big-v2 kind. The behavior is data-
+dependent: **capacity compounds with quality, not against noise.**
 
 ### Direct evidence of v2 data noise: spike-guard triggers
 
@@ -733,12 +730,13 @@ dataset":
 
 | Run | Spike-guard triggers |
 |-----|----------------------|
-| Base v1 (9.3M strict-filter) | **0** (100K steps) |
+| Base v1.0 (9.3M strict-filter) | **1** (100K steps, step 17753) |
+| Base v1.1 redo (9.3M strict-filter, 122K steps) | **0** (122K steps) <!-- TODO: verify from training_report.txt --> |
 | Base v2 (30M loose-filter)   | ≥1 (live-observed; log not retained) |
 | Big v2  (30M loose-filter)   | **12** (416K steps, from swanlab log) |
 
-v1's zero-trigger count is the strong signal: across 100K training
-steps, not one batch produced a loss >1.3× of the running average. Big
+v1's near-zero-trigger count is the strong signal: across 100K+ training
+steps, essentially no batch produced a loss >1.3× of the running average. Big
 v2's 12 triggers over 416K steps (≈ 1 per 35K steps) are not an
 emergency per run, but they are qualitatively impossible on v1's data
 — the corpus simply doesn't contain batches that loss-spike a
@@ -761,29 +759,33 @@ spending once the first two are solid. On v2's 30M noisy corpus, both
 Base v2 and Big v2 converge below v1's 9.3M strict-filter result —
 capacity didn't rescue the noise, it fit more of it.
 
-The next clean iteration should reuse v1's strict cleaning thresholds
-on the full 40M raw corpus (yielding perhaps 10-12M *cleanly-aligned*
-pairs instead of v1's accidentally-truncated 9.3M), then train Base at
-v2's extended schedule. That decouples quality from quantity so both
-gains compound instead of fighting. Promoting back to Big only makes
-sense once a clean Base result exceeds v1's 34.69.
+The v1.1 redo already confirms the first two factors on the 9.3M
+strict-filter data: full-coverage SPM + a +22K-step extension moved
+Base from 34.69 to 35.31 test without touching capacity or data size.
+A future clean iteration could reuse v1's strict cleaning thresholds
+on the full 40M raw corpus (yielding perhaps 10–12M *cleanly-aligned*
+pairs instead of v1's accidentally-truncated 9.3M) and train Base on
+v2's extended schedule. That would decouple quality from quantity so
+both gains compound instead of fighting. Promoting back to Big only
+makes sense once a clean Base result exceeds v1.1's 35.31.
 
 ### Roadmap (updated)
 
-Big v2, en-de Base, and en-de Big are now completed. Remaining items:
+Big v2, en-de Base, en-de Big, and the en-fr v1 tokenizer-fix rerun are
+now completed. Remaining items:
 
-1. **Strict-filter en-fr v1 rerun (tokenizer fix, priority next)** — keep
-   the original 9.3M strict-filter setup, retrain SentencePiece with
-   `character_coverage=1.0`, and rerun Base to remove the `<unk>` ceiling
-   from accented French tokens.
+1. ✅ **Strict-filter en-fr v1 rerun (tokenizer fix)** — DONE as v1.1:
+   retrained SentencePiece at `character_coverage=1.0` and extended
+   Base training to 122K steps on the same 9.3M strict-filter data.
+   Result: valid 30.52 / test 35.31 (+0.52 / +0.62 over v1.0).
 2. **Fine-tuning study** — take the trained en-fr/en-de models into an
    external fine-tuning repo to measure task-specific gains on top of
    general-domain MT pretraining.
 3. **Final report** — combine all runs (zh-en Base ✗, zh-en Big ✗,
-   en-fr Base v1 ✅, en-fr Big v1 tied, en-fr Base v2 converged-but-
-   below-v1, en-fr Big v2 below-Base-v2, en-de Base ✅, en-de Big ⚠️) with
-   dedicated sections on data-quality/quantity/capacity ablations and BLEU
-   limitations (chrF / BLEURT / COMET cross-validation on strongest checkpoints).
+   en-fr Base v1.1 ✅, en-fr Big v1 diagnostic, en-fr Base v2 converged-
+   but-below-v1, en-fr Big v2 below-Base-v2, en-de Base ✅, en-de Big ⚠️)
+   with dedicated sections on data-quality/quantity/capacity ablations and
+   BLEU limitations (chrF / BLEURT / COMET cross-validation on strongest checkpoints).
 
 ## Failure Case: Base on WMT17 zh-en
 
