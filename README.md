@@ -6,14 +6,17 @@ trained on WMT parallel corpora without any pretrained weights.
 [![en-fr Base on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--fr%20Base%2060M-yellow)](https://huggingface.co/euswbnix/transformer-wmt14-enfr-base)
 [![en-fr Big on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--fr%20Big%20209M-orange)](https://huggingface.co/euswbnix/transformer-wmt14-enfr-big)
 [![en-de Base on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--de%20Base%2060M-olive)](https://huggingface.co/euswbnix/transformer-wmt14-ende-base)
+[![en-de Big on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--de%20Big%20209M-darkgreen)](https://huggingface.co/euswbnix/transformer-wmt14-ende-big)
 
 **Current status:** Transformer Base on WMT14 en-fr — **valid 30.52 / test 35.31 BLEU
 on newstest2013/2014** (sacrebleu 13a, checkpoint-averaged, v1.1 redo on 9.3M
 strict-filtered pairs with full-coverage SPM + extended 122K-step schedule;
 replaces the earlier v1.0 run at 30.00 / 34.69).
-Both Base (60M) and Big (209M, test 34.66) checkpoints are published on HuggingFace Hub:
+Published HuggingFace checkpoints:
 [`euswbnix/transformer-wmt14-enfr-base`](https://huggingface.co/euswbnix/transformer-wmt14-enfr-base) ·
-[`euswbnix/transformer-wmt14-enfr-big`](https://huggingface.co/euswbnix/transformer-wmt14-enfr-big).
+[`euswbnix/transformer-wmt14-enfr-big`](https://huggingface.co/euswbnix/transformer-wmt14-enfr-big) ·
+[`euswbnix/transformer-wmt14-ende-base`](https://huggingface.co/euswbnix/transformer-wmt14-ende-base) ·
+[`euswbnix/transformer-wmt14-ende-big`](https://huggingface.co/euswbnix/transformer-wmt14-ende-big).
 See *Success Case: Base on WMT14 en-fr* below.
 
 **Full trajectory** (documented in this README as success → failure → diagnosis):
