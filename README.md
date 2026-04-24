@@ -8,16 +8,21 @@ trained on WMT parallel corpora without any pretrained weights.
 [![en-de Base on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--de%20Base%2060M-olive)](https://huggingface.co/euswbnix/transformer-wmt14-ende-base)
 [![en-de Big on HF](https://img.shields.io/badge/%F0%9F%A4%97%20HF-en--de%20Big%20209M-darkgreen)](https://huggingface.co/euswbnix/transformer-wmt14-ende-big)
 
-**Current status:** Transformer Base on WMT14 en-fr — **valid 30.52 / test 35.31 BLEU
-on newstest2013/2014** (sacrebleu 13a, checkpoint-averaged, v1.1 redo on 9.3M
-strict-filtered pairs with full-coverage SPM + extended 122K-step schedule;
-replaces the earlier v1.0 run at 30.00 / 34.69).
+**Current status:** Transformer Big on WMT14 en-fr — **valid 31.14 / test 35.87
+BLEU on newstest2013/2014** (sacrebleu 13a, checkpoint-averaged, Big v1.1 redo
+on the same 9.3M strict-filtered pairs as Base v1.1, full-coverage SPM, 280K
+schedule early-stopped at 260K via patience). Base v1.1 on the same data:
+**valid 30.52 / test 35.31**. Big v1.1 exceeds Base v1.1 by **+0.56 test BLEU**
+— on clean data at this scale, capacity does pay. The old v1.0 runs (Base
+34.69 / Big 34.66, "tied Base" narrative) are retired.
 Published HuggingFace checkpoints:
 [`euswbnix/transformer-wmt14-enfr-base`](https://huggingface.co/euswbnix/transformer-wmt14-enfr-base) ·
 [`euswbnix/transformer-wmt14-enfr-big`](https://huggingface.co/euswbnix/transformer-wmt14-enfr-big) ·
 [`euswbnix/transformer-wmt14-ende-base`](https://huggingface.co/euswbnix/transformer-wmt14-ende-base) ·
 [`euswbnix/transformer-wmt14-ende-big`](https://huggingface.co/euswbnix/transformer-wmt14-ende-big).
-See *Success Case: Base on WMT14 en-fr* below.
+The en-fr Big HF repo has been overwritten with the v1.1 weights. See
+*Success Case: Base on WMT14 en-fr* and *Success Case: Big on WMT14 en-fr*
+below.
 
 **Full trajectory** (documented in this README as success → failure → diagnosis):
 1. ❌ Base on WMT17 zh-en — mode collapse, BLEU 0.77
@@ -26,10 +31,11 @@ See *Success Case: Base on WMT14 en-fr* below.
    test / 30.52 valid (averaged), converged cleanly; replaces the earlier v1.0
    (34.69 test) after retraining SPM at `character_coverage=1.0` and extending
    from 100K → 122K steps (+0.62 test / +0.52 valid vs v1.0)
-4. 〰️ Big on WMT14 en-fr (v1) — BLEU 34.66 (averaged); matches the old Base v1.0
-   baseline (34.69) but sits 0.65 below the new Base v1.1 (35.31) — evidence
-   that capacity alone, without the tokenizer + schedule fixes, does not exceed
-   Base on this 9.3M data scale. Not rerun.
+4. ✅ Big on WMT14 en-fr (v1.1, tokenizer fix + extended schedule) — BLEU 35.87
+   test / 31.14 valid (averaged from 5 ckpts over steps 210K–250K, early-
+   stopped at 260K of a planned 280K via patience), **exceeds Base v1.1 by
+   +0.56** → on clean data at this scale, capacity does pay, contrary to the
+   v1.0 "tied Base" reading. Original Big v1.0 (34.66) is retired.
 5. ✅ Base on WMT14 en-fr (v2) — BLEU 33.90 test, 29.23 valid (600K steps, 4 epochs
    on 30M loose-filter pairs); **below v1 despite 3× data + 6× steps** — the
    data-quality/quantity trap.
@@ -41,8 +47,9 @@ See *Success Case: Base on WMT14 en-fr* below.
 8. ⚠️ Big on WMT14 en-de — BLEU 23.01 valid / 22.47 test (avg-5 @ ~466K), below
    en-de Base despite larger capacity and longer training.
 
-Next: fine-tuning study, then final report. (The strict-filter en-fr v1
-tokenizer-fix rerun is done — landed as v1.1 above.)
+Next: fine-tuning study (if planned), then final report. (Both the Base v1.1
+and Big v1.1 tokenizer-fix reruns are done; Big v1.1 is now the best model
+in the project.)
 
 ## Features
 
@@ -299,8 +306,9 @@ python scripts/interactive_translate.py \
 
 | Config | Valid BLEU | Test BLEU | Training time | Status |
 |--------|-----------|-----------|---------------|--------|
-| **Base v1.1 (WMT14 en-fr, 9.3M, SPM cov=1.0, 122K steps)** avg-5 | **30.52** | **35.31** | ~2h 30m on 5090 | 🏆 best model in the project (replaces v1.0 at 30.00 / 34.69) |
-| Big v1 (WMT14 en-fr, 10M)             | 30.45     | 34.66     | ~6h on 5090   | 🥈 second-best test; matches old Base v1.0 (34.69) but below Base v1.1 (35.31) |
+| **Big v1.1 (WMT14 en-fr, 9.3M, SPM cov=1.0, 260K/280K steps)** avg-5 | **31.14** | **35.87** | ~14h on 5090 | 🏆 best model in the project; +0.56 test over Base v1.1 on identical data |
+| Base v1.1 (WMT14 en-fr, 9.3M, SPM cov=1.0, 122K steps) avg-5 | 30.52 | 35.31 | ~2h 30m on 5090 | 🥈 strongest Base; replaces v1.0 at 30.00 / 34.69 |
+| Big v1.0 (WMT14 en-fr, 10M, SPM cov=0.9995, historical) avg-7 | 30.45 | 34.66 | ~6h on 5090 | retired — superseded by Big v1.1 |
 | Base v2 (WMT14 en-fr, 30M) avg-5      | 29.23     | 33.90     | 12h 45m on 5090 | ⚠️ below v1 despite more data |
 | Big v2 (WMT14 en-fr, 30M) avg-5       | 28.91     | 33.03     | ~9h on 5090 (halted @ 416K/800K) | ⚠️ below Base v2 — capacity hurts on noisy data |
 | Base (WMT14 en-de, 4.17M) avg-5       | 24.35     | 24.04     | single 5090, 230,523 steps | ✅ reached en-de Base release threshold |
@@ -310,9 +318,24 @@ python scripts/interactive_translate.py \
 
 BLEU reported as sacrebleu `13a` (modern detokenized standard). Published
 Vaswani Base on WMT14 en-fr is 38.1 **in historical tokenized BLEU**, which is
-roughly equivalent to 35–36 sacrebleu — so our 35.31 sits **inside the paper
-Base band**, using a 9.3M strict-filtered subset (vs the paper's 36M full
-corpus).
+roughly equivalent to 35–36 sacrebleu — so our Base v1.1 at 35.31 sits
+**inside the paper Base band**, and Big v1.1 at 35.87 sits inside the Big
+band, using a 9.3M strict-filtered subset (vs the paper's 36M full corpus).
+
+### Data quality determines the sign of capacity return
+
+The four en-fr runs fall cleanly into a 2×2 grid:
+
+| Data | Base (60M) | Big (209M) | Δ (Big − Base) |
+|---|---|---|---|
+| v1.1 (9.3M strict-filter) | 35.31 | **35.87** | **+0.56** ✓ |
+| v2 (30M loose-filter)     | 33.90 | 33.03     | **−0.87** ✗ |
+
+The same 3.5× capacity jump **pays +0.56 BLEU on clean data and costs −0.87
+on noisy data**. The sign of the return on capacity is determined by data
+quality, not by capacity itself. Capacity is a lever; data quality sets
+whether the lever is connected to the output. This is the single most
+compact claim the project supports.
 
 ## Success Case: Base on WMT14 en-fr (v1.1)
 
@@ -339,8 +362,8 @@ test** BLEU.
 
 The curves below are from the v1.1 run. Loss is monotonic with no spikes;
 BLEU rises nearly monotonically into the convergence band around step 80K
-and keeps creeping up through the 100K → 122K extension window. <!-- TODO:
-refresh per-step BLEU numbers from the v1.1 training_report.txt -->
+and keeps creeping up through the 100K → 122K extension window. (Detailed
+per-eval trajectory available in `training_report.txt`.)
 
 Loss curve is monotonic with no spikes; BLEU rises nearly monotonically,
 then oscillates ±0.25 in the convergence band, with the 100K → 122K
@@ -366,8 +389,8 @@ Observations:
 - **Elision is 90% correct**: "d'Obama" (not "de Obama"), "l'effet" (not
   "le effet"), "n'est" (not "ne est").
 - **Accented French is preserved**: v1.1's SPM uses `character_coverage=1.0`,
-  so rare accented characters (`Israël`, `Noël`, `maïs`, …) stay in the
-  vocabulary instead of being mapped to `<unk>` as in v1.0.
+  so rare accented characters stay in the vocabulary (v1.0 used 0.9995;
+  v1.1 uses 1.0).
 
 ### Interactive samples (out-of-domain robustness)
 
@@ -446,8 +469,7 @@ The differences that matter:
 - Warmup: 4000 steps
 - Gradient clip: 1.0
 - Loss spike guard: ratio 1.3, EMA α 0.005 (inherited from Big zh-en failure
-  analysis). **0 triggers** over the 122K-step v1.1 run. <!-- TODO: verify
-  from v1.1 training_report.txt -->
+  analysis). **0 triggers** over the 122K-step v1.1 run (confirmed).
 - Effective batch: ~100K tokens (24576 × 4 accumulation)
 - Schedule: 122K steps total (100K original + 22K extension).
 - Training time: ~2h 30m on a single RTX 5090 (BF16), end-to-end.
@@ -468,17 +490,15 @@ python scripts/eval_bleu.py \
     --src data/test.en --ref data/test.fr
 ```
 
-## Diagnostic Case: Big on WMT14 en-fr (v1)
+## Success Case: Big on WMT14 en-fr (v1.1)
 
-Trained Transformer Big (~209M params) on the **same cleaned 9.3M-pair
-subset used for the original Base v1.0** for 279K steps on the same single
-RTX 5090. **Converged to BLEU 30.16 on newstest2013 and 34.66 on
-newstest2014** after 7-checkpoint averaging. At the time this matched
-Base v1.0's 34.69 almost exactly despite 3.5× parameters and 2.8× training
-steps on identical data. After the v1.1 Base redo (35.31 test) Big v1 now
-sits **0.65 below Base v1.1** without having been rerun. The updated
-lesson: on this 9.3M data scale, extra capacity alone — without the
-tokenizer + schedule fixes applied in v1.1 — did not exceed Base.
+Trained Transformer Big (~209M params) on the **same 9.3M strict-filtered
+pairs as Base v1.1**, same full-coverage SPM (`character_coverage=1.0`),
+same `data_enfr_v1/` folder. Planned 280K schedule, early-stopped at 260K
+via patience. **Converged to BLEU 31.14 on newstest2013 and 35.87 on
+newstest2014** after averaging 5 checkpoints over steps 210K–250K. This is
+**+0.56 test BLEU over Base v1.1 (35.31)** on identical data — and +1.21
+over the retired Big v1.0 (34.66).
 
 ![Big en-fr training curves](assets/training_curves_big_enfr_v1.png)
 
@@ -486,54 +506,34 @@ tokenizer + schedule fixes applied in v1.1 — did not exceed Base.
 
 | | newstest2013 (valid) | newstest2014 (test) |
 |---|---|---|
-| Best single checkpoint (step 261K) | 30.16 | — |
-| Averaged (7 ckpts, steps 255K–279K + best) | **30.45** | **34.66** |
-| Averaging gain on valid | +0.29 | — |
+| Big v1.1 averaged (5 ckpts, steps 210K–250K) | **31.14** | **35.87** |
+| Base v1.1 averaged (last 5, ~100K–122K) | 30.52 | 35.31 |
+| Big v1.1 − Base v1.1 | +0.62 | **+0.56** |
+| Big v1.0 (historical, 0.9995 SPM, 279K steps) | 30.45 | 34.66 |
+| Big v1.1 − Big v1.0 | +0.69 | **+1.21** |
 
-### Training trajectory milestones
+(Detailed per-eval trajectory available in `training_report.txt`.)
 
-| Step  | Train Loss | Valid BLEU | LR       | Note |
-|-------|------------|------------|----------|------|
-| 20K   | ~3.6       | 19.74      | 3.3e-4   | first eval |
-| 50K   | 2.78       | 25.25      | 4.6e-4   | past Noam peak (4.86e-4 @ 37K) |
-| 100K  | 2.71       | 27.79      | 3.0e-4   | |
-| 150K  | 2.67       | 28.76      | 2.4e-4   | end of epoch 1 at ~147K |
-| 200K  | 2.63       | 29.54      | 2.1e-4   | |
-| 246K  | 2.61       | **30.04**  | 1.9e-4   | first crossing of 30 |
-| 261K  | 2.60       | **30.16**  | 1.85e-4  | **single-model peak** |
-| 279K  | 2.58       | 29.87      | 1.77e-4  | interrupted; train↓ valid→ (mild divergence) |
+### What Big v1.1 says — the "tied Base" narrative is dead
 
-Total training time: **5h 52m** on a single RTX 5090 (BF16, effective batch
-~32K tokens/step).
+The v1.0 reading was that Big tied Base almost exactly (34.66 vs 34.69),
+which looked like a shared ceiling on the 9.3M corpus. With the tokenizer
+fix (`character_coverage=1.0`) and the extended schedule applied to Big
+the same way they were applied to Base in v1.1, **Big cleanly exceeds
+Base by +0.56 test BLEU**. Three implications:
 
-### What Big v1 says (post-v1.1)
-
-Under the original v1.0 comparison Big tied Base almost exactly, which at
-the time read as a shared ceiling. With the v1.1 Base at 35.31 test BLEU,
-the picture updates: Big v1 (34.66) matches *old* Base v1.0 (34.69) but
-falls **0.65 below** the new Base v1.1. Two things follow:
-
-1. **Capacity alone is not enough on 9.3M data.** Big got 3.5× the
-   parameters and 2.8× the steps over Base v1.0 and landed in the same
-   place. Base then got a tokenizer fix + a 22K-step extension on the
-   same data and pulled ahead by 0.65. The useful gains on this corpus
-   came from preprocessing + schedule, not parameter count.
-2. **Reference-bias is still a real effect, just not a ceiling.** Big's
-   translations are consistently fluent and use valid French paraphrases
-   the reference translator didn't pick (e.g.
-   `stratégie républicaine **de lutte contre**` vs the reference's
-   `stratégie républicaine **pour contrer**` — both standard French;
-   BLEU penalizes one). That variance helps explain why Big's extra
-   training signal converts into ≈ 0 test-BLEU gain, but it's a cost
-   Big pays, not a cap everyone shares.
-3. **Train loss is still descending at stop.** 2.58 at 279K vs old
-   Base's 2.56 at 100K — Big had more to give, but on this data scale
-   it didn't translate into BLEU.
-
-**So Big v1 is a useful diagnostic run: capacity alone doesn't beat Base
-on 9.3M en-fr.** The v2 line then tried the orthogonal axis — scale the
-data (to 30M, loose-filter) — to see whether capacity would pay off on a
-larger corpus. It didn't, for different reasons documented below.
+1. **The v1.0 tie was a tokenizer + schedule artifact, not a capacity
+   ceiling.** Big was working in v1.0 — it was being throttled by the
+   same tokenizer tax that Base was paying. Once that tax is removed on
+   both sides, capacity returns positively on clean data.
+2. **On clean data at this scale (9.3M), capacity does pay.** The
+   return is modest (+0.56) but real and consistent on both valid
+   (+0.62) and test (+0.56). This is the expected Vaswani-band
+   behaviour: Big outperforms Base when the data doesn't punish it.
+3. **The sign of the capacity return depends on data quality.** Same
+   capacity jump, same codebase, same hardware, on v2's 30M loose-
+   filter corpus gives **−0.87 test** (Big v2 vs Base v2). See the
+   2×2 matrix at the top of Results.
 
 ### Sample translations (averaged checkpoint, newstest2013)
 
@@ -550,22 +550,34 @@ REF: L'effet de la vitamine D sur le cancer n'est pas clairement établi
         → translator escalated register and added explicitation
 ```
 
-(Big v1 was trained against the old SentencePiece model at
-`character_coverage=0.9995`, so some accented-character UNKs appear in
-its outputs. The v1.1 Base redo uses `character_coverage=1.0` and does
-not have this issue.)
-
 ### Configuration and compute
 
 - Architecture: d_model 1024, 16 heads, 6+6 layers, FFN 4096, dropout 0.2
 - Parameters: 209,129,472
+- Data: 9.3M strict-filter pairs (same `data_enfr_v1/` as Base v1.1)
+- Tokenizer: SentencePiece BPE, 32K vocab, `character_coverage=1.0`
 - Precision: BF16 autocast
 - Effective batch: ~32K tokens (8192 × 4 accumulation) — 1/3 of Base's 100K
-- Warmup: 8000 steps (longer than Base's 4K — safer for Big's larger weights)
-- LR schedule: Noam × 1.5, peak 4.86e-4 at step ~37K, min_lr floor 1e-5
-- Loss spike guard: ratio 1.3, EMA α 0.005. **Triggered twice** (steps
-  105432 and one earlier) — both single-batch noise events from the Common
-  Crawl portion of the corpus; dropped cleanly, no training disruption.
+- Warmup: 8000 steps
+- LR schedule: Noam × 1.5, peak 4.86e-4, min_lr floor 1e-5
+- Schedule: 280K planned, early-stopped at 260K via patience
+- Checkpoint averaging: 5 ckpts over steps 210K–250K
+- Loss spike guard: ratio 1.3, EMA α 0.005. **25 triggers** over 260K
+  steps (≈ 0.96 per 10K steps). See *Spike-guard cross-run analysis*
+  below — this rate is **not** a clean measure of data noise on its
+  own; it's a joint function of data and model convergence depth.
+
+### Historical note: Big v1.0 (retired)
+
+The original Big v1.0 run used SPM `character_coverage=0.9995` and a
+different cleaned subset (10M pairs, 279K steps). It peaked at 30.16
+valid and averaged to 30.45 / 34.66 over 7 checkpoints. Under the v1.0
+comparison this tied Base v1.0's 34.69 almost exactly, which at the
+time read as a shared ceiling and was written up here as a diagnostic
+case. With v1.1 Big at 35.87 test, Big v1.0 is now retired — kept only
+as provenance for the "+1.21 over old Big" number. The HF repo
+`euswbnix/transformer-wmt14-enfr-big` has been overwritten with the
+v1.1 weights.
 
 ## Ablation Case: Data quality vs. capacity on WMT14 en-fr
 
@@ -573,9 +585,10 @@ The v2 line of experiments was designed to attack v1's (then-)34.69 test-BLEU
 ceiling along two axes: **more data** (Base v2) and **more capacity on
 more data** (Big v2). Both converged cleanly; both landed **below** v1,
 and Big v2 landed **below Base v2** on the same data. (After the v1.1
-redo, v1's target moved to 35.31, so the v2 gap is even wider — but the
-story and the ordering of conclusions are unchanged.) This section
-documents the full double-ablation and what it implies.
+reruns, the v1 targets moved to 35.31 Base / 35.87 Big, so the v2 gap is
+even wider — but the story and the ordering of conclusions are unchanged.)
+This section documents the full double-ablation and what it implies; see
+also the 2×2 matrix at the top of *Results* for the compact summary.
 
 ![Base v2 en-fr training curves](assets/training_curves_base_enfr_v2.png)
 
@@ -583,10 +596,12 @@ documents the full double-ablation and what it implies.
 
 | Run      | Params | Data       | SPM cov. | Steps | Valid (avg) | Test (avg) |
 |----------|--------|-----------|----------|-------|-------------|------------|
-| Base v1.1 | 60M   | 9.3M strict filter | 1.0    | 122K | **30.52** | **35.31** 🏆 |
+| **Big v1.1** | **209M** | **9.3M strict filter** | **1.0** | **260K / 280K (early-stop)** | **31.14** | **35.87** 🏆 |
+| Base v1.1 | 60M   | 9.3M strict filter | 1.0    | 122K | 30.52 | 35.31 |
 | Base v1.0 (historical) | 60M | 9.3M strict filter | 0.9995 | 100K | ~30.00 | 34.69 |
+| Big v1.0 (historical) | 209M | 10M (older cleaning) | 0.9995 | 279K | 30.45 | 34.66 |
 | Base v2  | 60M    | 30M loose filter | 1.0    | 600K | 29.23 | 33.90 |
-| **Big v2**  | **209M** | **30M loose filter** | **1.0** | **416K** (halted) | **28.91** | **33.03** |
+| Big v2   | 209M   | 30M loose filter | 1.0    | 416K (halted) | 28.91 | 33.03 |
 
 All runs on a single RTX 5090. The leftmost two columns are the only
 things that change across the three rows. The story these numbers tell:
@@ -717,78 +732,122 @@ reached the plateau region, it had fit patterns that Base v2's smaller
 capacity was forced to discard. The result is a slightly worse
 distribution over news-domain hypotheses, visible in BLEU.
 
-This is not a fundamental "big models overfit" claim — Big v1 on the
-cleaner 9.3M corpus landed at 34.66, matching old Base v1.0 (34.69)
-without any regression of the Big-v2 kind. The behavior is data-
-dependent: **capacity compounds with quality, not against noise.**
+This is not a fundamental "big models overfit" claim — Big v1.1 on the
+cleaner 9.3M corpus landed at **35.87**, exceeding Base v1.1 (35.31)
+by +0.56 without any regression of the Big-v2 kind. The behavior is
+data-dependent: **capacity compounds with quality, and fights noise.**
+Same capacity jump, clean data → +0.56; noisy data → −0.87. Data
+quality sets the sign.
 
-### Direct evidence of v2 data noise: spike-guard triggers
+### Spike-guard cross-run analysis (and a methodology caveat)
 
 The training loop has a spike guard: if a micro-batch's loss exceeds
-`1.3 × EMA(recent-losses)`, the entire accumulated gradient for that
-effective batch is discarded. It exists to stop one pathological
-sample from corrupting weights. Trigger rates are a clean, model-size-
-independent measure of "how many outlier-loss samples are in this
-dataset":
+`1.3 × EMA(recent-losses)` (EMA α = 0.005), the entire accumulated
+gradient for that effective batch is discarded. It exists to stop one
+pathological sample from corrupting weights.
 
-| Run | Spike-guard triggers |
-|-----|----------------------|
-| Base v1.0 (9.3M strict-filter) | **1** (100K steps, step 17753) |
-| Base v1.1 redo (9.3M strict-filter, 122K steps) | **0** (122K steps) <!-- TODO: verify from training_report.txt --> |
-| Base v2 (30M loose-filter)   | ≥1 (live-observed; log not retained) |
-| Big v2  (30M loose-filter)   | **12** (416K steps, from swanlab log) |
+Full per-run counts across all four en-fr runs:
 
-v1's near-zero-trigger count is the strong signal: across 100K+ training
-steps, essentially no batch produced a loss >1.3× of the running average. Big
-v2's 12 triggers over 416K steps (≈ 1 per 35K steps) are not an
-emergency per run, but they are qualitatively impossible on v1's data
-— the corpus simply doesn't contain batches that loss-spike a
-competent model. Since the threshold is an EMA of the *same model's
-own loss*, it corrects for model capability — the absolute trigger
-rate is a property of the data, not the architecture. **The extra 20M
-pairs in v2 contain pathological samples that the strict-filter 9.3M
-does not.**
+| Run | Skips / steps | per 10K steps |
+|-----|---------------|---------------|
+| Base v1.1 (9.3M clean) | **0** / 122K | **0** |
+| Big  v1.1 (9.3M clean) | 25 / 260K    | **0.96** |
+| Base v2   (30M noisy)  | ≥1 (live-observed, log not retained) | — |
+| Big  v2   (30M noisy)  | 12 / 416K    | **0.29** |
 
-(Base v2's exact trigger count is lost because its run predates stdout
-log retention; triggers were observed live during training. Big v2's
-12 is from the retained swanlab log.)
+The counter-intuitive finding is in the last column: **Big on CLEAN v1
+data triggers the spike guard about 3.3× more often per step than Big
+on NOISY v2 data.** That is the opposite of "trigger rate = noise
+meter".
+
+The mechanism is straightforward once you write out the threshold:
+
+- On **clean** data, Big converges to a very low loss floor → the EMA
+  is tight → even modest per-batch loss bumps exceed `1.3 × EMA` and
+  trigger. Many of these triggers are "false positives" in the sense
+  that the batch isn't pathological; the model's own baseline is just
+  exceptionally tight.
+- On **noisy** data, Big's loss floor stays higher (persistent noise-
+  driven loss) → EMA is elevated → only genuinely catastrophic
+  samples clear `1.3 × EMA`. Fewer triggers, but each one is a real
+  outlier.
+
+**Methodology caveat.** `triggers per step` is therefore **not** a
+pure measure of data noise. It is a joint function of data noise AND
+model convergence depth. The correct framing:
+
+> The guard rate reflects "loss outliers relative to the model's own
+> EMA" — a joint function of data noise and model convergence. To
+> isolate data noise, compare **same-capacity** models across
+> **different data** (Base v1 vs Base v2), not same-data across
+> capacities.
+
+Under that framing, the valid comparison is the Base v1.1 (0 / 122K)
+vs Base v2 (≥1, live-observed) row — same 60M model, same α = 0.005
+guard, clean vs loose-filter data. That comparison still supports the
+original v2-data-noise claim: the strict-filter corpus is clean enough
+that a competent Base model's loss essentially never exceeds its own
+1.3× EMA. The loose-filter corpus produces real outliers live during
+training.
+
+What the Big v1.1-vs-v2 row does **not** support: it is not clean
+evidence of data noise, because the convergence depth differs. We
+used to treat that row that way in earlier drafts; it has been
+corrected here.
+
+(Base v2's exact trigger count is lost because its run predates
+stdout log retention; triggers were observed live during training.
+Big v2's 12 is from the retained swanlab log. Base v1.1's 0 and Big
+v1.1's 25 are from their respective `training_report.txt`.)
 
 ### Combined prescription
 
-**Filter first, scale second. Capacity second, never first.** The v1 →
-v2 → Big-v2 ladder pins the ordering: data quality dominates,
-schedule/compute is the second-order fix, and capacity is only worth
-spending once the first two are solid. On v2's 30M noisy corpus, both
-Base v2 and Big v2 converge below v1's 9.3M strict-filter result —
-capacity didn't rescue the noise, it fit more of it.
+**Filter first, scale second.** The v1.1 → v2 → Big-v2 ladder pins the
+ordering: data quality dominates, schedule/compute is the second-order
+fix, and capacity is only worth spending once the first two are
+solid. On v2's 30M noisy corpus, both Base v2 and Big v2 converge
+below v1.1's 9.3M strict-filter result — capacity didn't rescue the
+noise, it fit more of it.
 
-The v1.1 redo already confirms the first two factors on the 9.3M
-strict-filter data: full-coverage SPM + a +22K-step extension moved
-Base from 34.69 to 35.31 test without touching capacity or data size.
-A future clean iteration could reuse v1's strict cleaning thresholds
-on the full 40M raw corpus (yielding perhaps 10–12M *cleanly-aligned*
-pairs instead of v1's accidentally-truncated 9.3M) and train Base on
-v2's extended schedule. That would decouple quality from quantity so
-both gains compound instead of fighting. Promoting back to Big only
-makes sense once a clean Base result exceeds v1.1's 35.31.
+But the v1.1 Big result adds an important nuance: **on clean data at
+this scale (9.3M), scaling to Big does pay (modestly).** Big v1.1 beats
+Base v1.1 by +0.56 test BLEU on the same data, same SPM, same
+codebase. So the v2 failure was never "capacity never helps". It was
+"capacity amplifies whatever is in the data, including noise". Clean
+the data first, then Big gives a real but bounded return.
+
+The 2×2 summary: same 3.5× capacity jump pays +0.56 on clean v1 data
+and costs −0.87 on noisy v2 data. Data quality sets the sign of the
+capacity return. A future clean iteration could reuse v1's strict
+cleaning thresholds on the full 40M raw corpus (yielding perhaps
+10–12M *cleanly-aligned* pairs instead of v1's accidentally-truncated
+9.3M) and train Big on v2's extended schedule — the direction that
+has shown positive return under the 2×2, scaled up.
 
 ### Roadmap (updated)
 
-Big v2, en-de Base, en-de Big, and the en-fr v1 tokenizer-fix rerun are
-now completed. Remaining items:
+Big v2, en-de Base, en-de Big, the en-fr Base v1.1 tokenizer-fix rerun,
+and the en-fr Big v1.1 tokenizer-fix rerun are now all completed.
+Remaining items:
 
-1. ✅ **Strict-filter en-fr v1 rerun (tokenizer fix)** — DONE as v1.1:
-   retrained SentencePiece at `character_coverage=1.0` and extended
-   Base training to 122K steps on the same 9.3M strict-filter data.
-   Result: valid 30.52 / test 35.31 (+0.52 / +0.62 over v1.0).
-2. **Fine-tuning study** — take the trained en-fr/en-de models into an
-   external fine-tuning repo to measure task-specific gains on top of
-   general-domain MT pretraining.
-3. **Final report** — combine all runs (zh-en Base ✗, zh-en Big ✗,
-   en-fr Base v1.1 ✅, en-fr Big v1 diagnostic, en-fr Base v2 converged-
-   but-below-v1, en-fr Big v2 below-Base-v2, en-de Base ✅, en-de Big ⚠️)
-   with dedicated sections on data-quality/quantity/capacity ablations and
-   BLEU limitations (chrF / BLEURT / COMET cross-validation on strongest checkpoints).
+1. ✅ **Strict-filter en-fr Base v1 rerun (tokenizer fix)** — DONE as
+   Base v1.1: SPM `character_coverage=1.0`, 122K steps on 9.3M strict-
+   filter. Result: valid 30.52 / test 35.31 (+0.52 / +0.62 over v1.0).
+2. ✅ **Strict-filter en-fr Big v1 rerun (tokenizer fix + extended
+   schedule)** — DONE as Big v1.1: same data/SPM as Base v1.1, 280K
+   schedule early-stopped at 260K via patience, averaged over
+   210K–250K. Result: valid 31.14 / test 35.87 (+0.56 test over Base
+   v1.1 on identical data).
+3. **Fine-tuning / SFT study (if planned)** — take the trained
+   en-fr / en-de models into an external fine-tuning repo to measure
+   task-specific gains on top of general-domain MT pretraining.
+4. **Final report** — combine all runs (zh-en Base ✗, zh-en Big ✗,
+   en-fr Base v1.1 ✅, en-fr Big v1.1 ✅ (best), en-fr Base v2
+   converged-but-below-v1.1, en-fr Big v2 below-Base-v2, en-de Base ✅,
+   en-de Big ⚠️) with dedicated sections on the 2×2 data-quality /
+   capacity matrix, the spike-guard methodology caveat, and BLEU
+   limitations (chrF / BLEURT / COMET cross-validation on strongest
+   checkpoints).
 
 ## Failure Case: Base on WMT17 zh-en
 
