@@ -1,0 +1,108 @@
+\begin{thebibliography}{10}
+
+\bibitem{batheja2022qe}
+Akshay Batheja and Pushpak Bhattacharyya.
+\newblock Quality estimation filtering for translation mining.
+\newblock In {\em Proceedings of EMNLP 2022}, 2022.
+
+\bibitem{conneau2020unsupervised}
+Alexis Conneau, Kartikay Khandelwal, Naman Goyal, Vishrav Chaudhary, Guillaume
+  Wenzek, Francisco Guzm{\'a}n, Edouard Grave, Myle Ott, Luke Zettlemoyer, and
+  Veselin Stoyanov.
+\newblock Unsupervised cross-lingual representation learning at scale.
+\newblock In {\em Proceedings of the 58th Annual Meeting of the Association for
+  Computational Linguistics}, pages 8440--8451, 2020.
+
+\bibitem{gururangan2020dont}
+Suchin Gururangan, Ana Marasovi{\'c}, Swabha Swayamdipta, Kyle Lo, Iz~Beltagy,
+  Doug Downey, and Noah~A. Smith.
+\newblock Don't stop pretraining: Adapt language models to domains and tasks.
+\newblock In {\em Proceedings of the 58th Annual Meeting of the Association for
+  Computational Linguistics}, pages 8342--8360, 2020.
+
+\bibitem{hoffmann2022chinchilla}
+Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor
+  Cai, Eliza Rutherford, Diego de~Las~Casas, Lisa~Anne Hendricks, Johannes
+  Welbl, Aidan Clark, et~al.
+\newblock Training compute-optimal large language models.
+\newblock In {\em Advances in Neural Information Processing Systems}, 2022.
+
+\bibitem{junczys2019cscope}
+Marcin Junczys-Dowmunt.
+\newblock Microsoft translator at {WMT} 2019: Towards large-scale
+  document-level neural machine translation.
+\newblock In {\em Proceedings of the Fourth Conference on Machine Translation},
+  pages 225--233, 2019.
+
+\bibitem{kaplan2020scaling}
+Jared Kaplan, Sam McCandlish, Tom Henighan, Tom~B. Brown, Benjamin Chess, Rewon
+  Child, Scott Gray, Alec Radford, Jeffrey Wu, and Dario Amodei.
+\newblock Scaling laws for neural language models.
+\newblock {\em arXiv preprint arXiv:2001.08361}, 2020.
+
+\bibitem{koehn2018findings}
+Philipp Koehn, Huda Khayrallah, Kenneth Heafield, and Mikel~L. Forcada.
+\newblock Findings of the {WMT} 2018 shared task on parallel corpus filtering.
+\newblock In {\em Proceedings of the Third Conference on Machine Translation:
+  Shared Task Papers}, pages 726--739, 2018.
+
+\bibitem{kudo2018sentencepiece}
+Taku Kudo and John Richardson.
+\newblock {SentencePiece}: A simple and language independent subword tokenizer
+  and detokenizer for neural text processing.
+\newblock In {\em Proceedings of the 2018 Conference on Empirical Methods in
+  Natural Language Processing: System Demonstrations}, pages 66--71, 2018.
+
+\bibitem{mindermann2022prioritized}
+S{\"o}ren Mindermann, Jan Brauner, Muhammed Razzak, Mrinank Sharma, Andreas
+  Kirsch, Winnie Xu, Benedikt H{\"o}ltgen, Aidan~N. Gomez, Adrien Morisot,
+  Sebastian Farquhar, and Yarin Gal.
+\newblock Prioritized training on points that are learnable, worth learning,
+  and not yet learnt.
+\newblock In {\em International Conference on Machine Learning}, pages
+  15630--15649, 2022.
+
+\bibitem{penedo2023refinedweb}
+Guilherme Penedo, Quentin Malartic, Daniel Hesslow, Ruxandra Cojocaru,
+  Alessandro Cappelli, Hamza Alobeidli, Baptiste Pannier, Ebtesam Almazrouei,
+  and Julien Launay.
+\newblock The {RefinedWeb} dataset for {Falcon LLM}: Outperforming curated
+  corpora with web data, and web data only.
+\newblock {\em arXiv preprint arXiv:2306.01116}, 2023.
+
+\bibitem{post2018call}
+Matt Post.
+\newblock A call for clarity in reporting {BLEU} scores.
+\newblock In {\em Proceedings of the Third Conference on Machine Translation:
+  Research Papers}, pages 186--191, 2018.
+
+\bibitem{rei2022cometkiwi}
+Ricardo Rei, Marcos Treviso, Nuno~M. Guerreiro, Chrysoula Zerva, Ana~C.
+  Farinha, Christine Maroti, Jos{\'e} G.~C. de~Souza, Taisiya Glushkova, Duarte
+  Alves, Luisa Coheur, Alon Lavie, and Andr{\'e} F.~T. Martins.
+\newblock {COMETK}iwi: {IST}-unbabel 2022 submission for the quality estimation
+  shared task.
+\newblock In {\em Proceedings of the Seventh Conference on Machine Translation
+  (WMT)}, pages 634--645, 2022.
+
+\bibitem{sennrich2016neural}
+Rico Sennrich, Barry Haddow, and Alexandra Birch.
+\newblock Neural machine translation of rare words with subword units.
+\newblock In {\em Proceedings of the 54th Annual Meeting of the Association for
+  Computational Linguistics}, pages 1715--1725, 2016.
+
+\bibitem{tay2022scaling}
+Yi~Tay, Mostafa Dehghani, Samira Abnar, Hyung~Won Chung, William Fedus, Jinfeng
+  Rao, Sharan Narang, Vinh~Q. Tran, Dani Yogatama, and Donald Metzler.
+\newblock Scaling laws vs model architectures: How does inductive bias
+  influence scaling?
+\newblock In {\em EMNLP 2022 Findings}, 2022.
+
+\bibitem{vaswani2017attention}
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones,
+  Aidan~N Gomez, {\L}ukasz Kaiser, and Illia Polosukhin.
+\newblock Attention is all you need.
+\newblock In {\em Advances in Neural Information Processing Systems}, pages
+  5998--6008, 2017.
+
+\end{thebibliography}

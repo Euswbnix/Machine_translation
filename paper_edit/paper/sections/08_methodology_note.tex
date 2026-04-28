@@ -1,0 +1,48 @@
+\section{Methodology Note: Spike-Guard Trigger Rate is Not a Pure Noise Meter}
+\label{sec:methodology}
+
+We added a loss-spike guard (\S\ref{sec:setup}) to the trainer to drop pathologically high-loss batches: if the current batch's average loss exceeds $1.3\times$ an EMA of recent batches, the gradient is discarded. The guard exists for a defensive reason --- preventing a single mis-scraped pair from corrupting weights --- and we initially read its trigger rate as a clean diagnostic of \emph{data noise}. That reading was wrong. This section documents the corrected interpretation and the evidence behind it.
+
+\subsection{Trigger counts across runs}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrrr}
+\toprule
+\textbf{Run}                 & \textbf{Skips} & \textbf{Steps} & \textbf{per 10K steps} \\
+\midrule
+Base v1.1 (clean 9.3M)       & 0   & 122K & 0.00 \\
+Big  v1.1 (clean 9.3M)       & 25  & 260K & 0.96 \\
+Big  v2   (noisy 30M)        & 12  & 416K & 0.29 \\
+\bottomrule
+\end{tabular}
+\caption{Spike-guard triggers across three runs, all using the same $1.3\times$ EMA threshold. Naively reading these as data-noise counts produces the surprising result that Big on \emph{clean} data triggers $3.3\times$ more often than Big on \emph{noisy} data. (Base v2 was an earlier run whose stdout logs were not retained; its trigger count is unrecoverable.)}
+\label{tab:spike_rates}
+\end{table}
+
+If the guard rate were a pure data-noise metric, Big v1.1 (clean) and Big v2 (noisy) should differ in the obvious direction. Table~\ref{tab:spike_rates} shows the \emph{opposite}: at fixed Big capacity, the clean run triggers more often than the noisy run.
+
+\subsection{The mechanism: tight-EMA false positives}
+
+The guard threshold is $1.3\times$ \emph{the model's own EMA loss}. On clean data Big converges to a very low loss (training floor $\sim$~2.3), and the EMA tracks this floor tightly; even modest natural batch-to-batch variation can exceed $1.3\times$ a tight floor and trigger the guard. Triggered batches in this regime are essentially \emph{false positives} --- the model's well-converged baseline makes ordinary batches look spiky.
+
+On noisy data the loss never converges as tightly: the noise floor stays elevated ($\sim$~3.0 for Big v2, vs.\ Big v1.1's $\sim$~2.3). The EMA is therefore looser, and only \emph{genuinely catastrophic} samples can exceed $1.3\times$ a higher floor. Triggers are rarer, but each one is more likely to be real.
+
+The same mechanism therefore produces \emph{more triggers on cleaner data}, because cleanliness tightens the loss EMA and lowers the absolute spike-detection threshold.
+
+\subsection{What can the trigger rate be used for?}
+
+The corrected reading: \textbf{trigger rate is a joint function of data noise AND the model's own convergence depth.} Two implications:
+
+\paragraph{Same-capacity, different-data comparisons are valid.} Base v1.1 vs.\ Base v2 is a clean test of data noise --- the model is fixed, only the data changes, so differences in trigger rate isolate to the data. Unfortunately the Base v2 stdout was not retained at training time, so we cannot report this comparison numerically. \emph{Our published v1.1 trainer now persists trigger counts to the training report so future runs are not lost.}
+
+\paragraph{Cross-capacity, same-data comparisons are confounded.} Base v1.1 (0 triggers) and Big v1.1 (25 triggers) on identical data is \emph{not} evidence about the data --- it is evidence about the difference in convergence depth between the two models. Larger models reach lower loss floors, tightening their EMAs and inflating trigger counts on the \emph{same} corpus.
+
+\paragraph{Same-capacity, same-data comparisons across runs} (e.g.\ comparing trigger rates from a tokenizer-fix retraining against the original) are valid as a sanity check that pipeline changes have not introduced new pathological samples.
+
+\subsection{Recommendation}
+
+For papers that wish to use spike-guard-style or RHO-Loss-style EMA-relative loss filters as a quantitative data-noise diagnostic, we recommend reporting the trigger rate \emph{conditional on convergence depth}, e.g.\ as a function of late-training EMA loss. We do not do this here: our trigger counts inform our intuition about v2 noise but are not a numeric claim. The 0-vs-12 Base v1.1 vs.\ Big v2 comparison we initially used in our project notes is confounded along two axes (different model, different data) and is superseded by the table above with its associated caveat.
+
+This is a supplementary finding and does not affect the headline 2x2 claim. We include it because spike-guard or RHO-Loss-style~\cite{mindermann2022prioritized} filters are increasingly common in practice, and the false-positive-on-clean-data property is, in our experience, easy to miss until one accidentally produces a number that violates expectations.
