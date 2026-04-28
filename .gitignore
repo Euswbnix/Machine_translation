@@ -30,3 +30,6 @@ runs/
 # Claude Code agent worktrees (isolated copies spawned by mcp__ccd_session__spawn_task)
 .claude/worktrees/
 .claude/worktrees/
+
+# Local paper edits / Overleaf downloads
+paper_edit/
