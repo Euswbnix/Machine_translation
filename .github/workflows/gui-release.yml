@@ -56,7 +56,17 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path dist/TransformerMT.exe -DestinationPath dist/TransformerMT-Windows.zip -Force
+          if (Test-Path "dist/TransformerMT.exe") {
+            Compress-Archive -Path "dist/TransformerMT.exe" -DestinationPath "dist/TransformerMT-Windows.zip" -Force
+          }
+          elseif (Test-Path "dist/TransformerMT/TransformerMT.exe") {
+            Compress-Archive -Path "dist/TransformerMT/*" -DestinationPath "dist/TransformerMT-Windows.zip" -Force
+          }
+          else {
+            Write-Error "Windows build output not found under dist/."
+            Get-ChildItem -Recurse dist | Select-Object FullName
+            exit 1
+          }
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
