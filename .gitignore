@@ -19,6 +19,7 @@ outputs/
 __pycache__/
 *.pyc
 *.egg-info/
+.venv/
 
 # Logs
 *.log
@@ -33,3 +34,8 @@ runs/
 
 # Local paper edits / Overleaf downloads
 paper_edit/
+
+# GUI build artifacts
+build/
+dist/
+*.spec

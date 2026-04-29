@@ -1,0 +1,85 @@
+name: Build GUI Release (macOS + Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact_name: TransformerMT-macOS
+            bundle_glob: dist/TransformerMT*
+          - os: windows-latest
+            artifact_name: TransformerMT-Windows
+            bundle_glob: dist/TransformerMT*
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r gui/requirements_gui.txt
+          pip install pyinstaller
+
+      - name: Build app with PyInstaller
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean --windowed --name TransformerMT --paths . gui/main.py
+
+      - name: Package artifact (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd dist
+          ditto -c -k --sequesterRsrc --keepParent TransformerMT.app TransformerMT-macOS.zip
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/TransformerMT.exe -DestinationPath dist/TransformerMT-Windows.zip -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            dist/TransformerMT-macOS.zip
+            dist/TransformerMT-Windows.zip
+            ${{ matrix.bundle_glob }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Publish GitHub Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/**/*.zip

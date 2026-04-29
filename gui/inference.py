@@ -21,19 +21,52 @@ from src.inference.translate import batched_beam_search
 from src.data.tokenizer import BOS_ID, EOS_ID, PAD_ID
 
 
+class CancelledError(Exception):
+    """Raised when a translation run is cancelled by the caller."""
+
+
 # pysbd is small (~2MB) and handles English abbreviations / numbers well.
 # Lazy-imported so the desktop binary doesn't pay the cost on launch
 # if the user never translates.
 def _segment(text: str) -> List[str]:
+    text = text.replace("\u2029", "\n").replace("\u2028", "\n")
     try:
         import pysbd
         seg = pysbd.Segmenter(language="en", clean=False)
         return [s for s in seg.segment(text) if s.strip()]
     except ImportError:
-        # Fallback: simple regex split on sentence-final punctuation
-        # followed by whitespace. Coarser than pysbd but works.
-        parts = re.split(r"(?<=[.!?])\s+(?=[A-Z\"])", text)
+        # Fallback: split on newlines first, and also on sentence-final
+        # punctuation followed by whitespace. Coarser than pysbd but keeps
+        # email/paragraph formatting much better.
+        parts = re.split(r"(?:\r?\n+|(?<=[.!?])\s+)", text)
         return [p for p in parts if p.strip()]
+
+def _build_sentence_skeleton(text: str) -> Tuple[List[Tuple[bool, str]], List[str]]:
+    """Return (parts, sentences) where parts preserve original separators.
+
+    parts is a list of (is_sentence, chunk). Non-sentence chunks keep the
+    original whitespace/newlines/punctuation between sentence chunks so we
+    can reconstruct output with input formatting preserved.
+    """
+    text = text.replace("\u2029", "\n").replace("\u2028", "\n")
+    sents = _segment(text)
+    if not sents:
+        return ([(False, text)] if text else []), []
+
+    parts: List[Tuple[bool, str]] = []
+    idx = 0
+    for sent in sents:
+        pos = text.find(sent, idx)
+        if pos < 0:
+            # Fallback: if exact substring match fails, keep behavior safe.
+            return [], sents
+        if pos > idx:
+            parts.append((False, text[idx:pos]))
+        parts.append((True, sent))
+        idx = pos + len(sent)
+    if idx < len(text):
+        parts.append((False, text[idx:]))
+    return parts, sents
 
 
 def _is_translatable(s: str) -> bool:
@@ -58,6 +91,20 @@ def _looks_hallucinated(src: str, tgt: str) -> bool:
     return ratio > 2.5 or ratio < 0.3
 
 
+def _fix_missing_space_after_sentence_punct(text: str) -> str:
+    """Insert a space after sentence punctuation when it's missing.
+
+    Example: "phares.Auparavant" -> "phares. Auparavant"
+    """
+    # Keep newlines intact by only touching same-line runs (spaces/tabs).
+    # Handles:
+    #   "phares.Auparavant" -> "phares. Auparavant"
+    #   ").J'ai"            -> "). J'ai"
+    #   "»Aujourd'hui"      -> "» Aujourd'hui"
+    pattern = r"([.!?…][\"')\]»”]*)([ \t]*)(?=[A-Za-zÀ-ÖØ-öø-ÿ])"
+    return re.sub(pattern, r"\1 ", text)
+
+
 @dataclass
 class TranslationResult:
     sentences_src: List[str]
@@ -71,7 +118,14 @@ class TransformerMTRuntime:
 
     def __init__(self, model_dir: Path, device: Optional[str] = None):
         self.model_dir = Path(model_dir)
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        if device is not None:
+            self.device = device
+        elif torch.cuda.is_available():
+            self.device = "cuda"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            self.device = "mps"
+        else:
+            self.device = "cpu"
 
         with open(self.model_dir / "config.json") as f:
             cfg = json.load(f)
@@ -123,7 +177,7 @@ class TransformerMTRuntime:
             max_len=self.max_len,
             length_penalty=length_penalty,
         )[0]
-        return self._decode(hyp)
+        return _fix_missing_space_after_sentence_punct(self._decode(hyp))
 
     # ------------------------------------------------------------ public API
 
@@ -133,72 +187,130 @@ class TransformerMTRuntime:
         beam: int = 5,
         length_penalty: Optional[float] = None,
         progress_cb: Optional[Callable[[int, int, str], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        sentence_cache: Optional[dict] = None,
     ) -> TranslationResult:
-        """Translate arbitrary-length text via sentence segmentation."""
+        """Translate arbitrary-length text via sentence segmentation.
+
+        ``cancel_check`` is polled between sentences; returning True aborts
+        the run early and raises CancelledError. ``sentence_cache`` is an
+        optional dict[str, str] that memoizes per-sentence translations
+        across calls (live-typing mode reuses it so re-translating only
+        hits the model on changed sentences).
+        """
+        text = text.replace("\u2029", "\n").replace("\u2028", "\n")
+
         # en-de in our setup uses lp=0.6 by default; en-fr uses 1.0
         if length_penalty is None:
             tgt_lang = self.cfg.get("tgt_lang", "fr")
             length_penalty = 0.6 if tgt_lang == "de" else 1.0
 
-        sentences = _segment(text)
+        # Strict formatting preservation: split by physical lines while keeping
+        # line endings exactly, translate per line body, then stitch back.
+        lines = text.splitlines(keepends=True)
+        if not lines and text:
+            lines = [text]
+        all_sentences_src: List[str] = []
+        per_line_sentences: List[Tuple[int, str, str, List[Tuple[bool, str]], List[str]]] = []
+        for idx, line in enumerate(lines):
+            body = line.rstrip("\r\n")
+            ending = line[len(body):]
+            parts, sents = _build_sentence_skeleton(body)
+            per_line_sentences.append((idx, body, ending, parts, sents))
+            all_sentences_src.extend(sents)
+
         outputs: List[str] = []
         flagged: List[bool] = []
-
-        for i, sent in enumerate(sentences):
+        total = len(all_sentences_src)
+        for i, sent in enumerate(all_sentences_src):
+            if cancel_check is not None and cancel_check():
+                raise CancelledError()
             if progress_cb is not None:
-                progress_cb(i, len(sentences), sent[:60])
+                progress_cb(i, total, sent[:60])
             if not _is_translatable(sent):
-                outputs.append(sent)         # preserve URLs, pure punctuation, etc.
+                outputs.append(sent)
                 flagged.append(False)
                 continue
-            tgt = self._translate_one(sent, beam=beam,
-                                      length_penalty=length_penalty)
+            cache_key = (sent, beam, length_penalty)
+            if sentence_cache is not None and cache_key in sentence_cache:
+                tgt = sentence_cache[cache_key]
+            else:
+                tgt = self._translate_one(sent, beam=beam,
+                                          length_penalty=length_penalty)
+                if sentence_cache is not None:
+                    sentence_cache[cache_key] = tgt
+            # Normalize punctuation spacing even for cache hits from older runs.
+            tgt = _fix_missing_space_after_sentence_punct(tgt)
             outputs.append(tgt)
             flagged.append(_looks_hallucinated(sent, tgt))
         if progress_cb is not None:
-            progress_cb(len(sentences), len(sentences), "done")
+            progress_cb(total, total, "done")
 
-        # Re-assemble. We don't try to reconstruct exact whitespace from the
-        # input — we join translated sentences with single spaces, but
-        # preserve newline groupings by re-detecting them from the input.
-        output_text = _reassemble(text, sentences, outputs)
+        # Rebuild each line body with translated sentence slice, then re-attach
+        # the exact original line ending.
+        out_lines = list(lines)
+        sent_idx = 0
+        for line_idx, body, ending, parts, sents in per_line_sentences:
+            n = len(sents)
+            translated_body = _reassemble(
+                body,
+                parts,
+                outputs[sent_idx : sent_idx + n],
+            )
+            out_lines[line_idx] = translated_body + ending
+            sent_idx += n
+        output_text = _fix_missing_space_after_sentence_punct("".join(out_lines))
 
         return TranslationResult(
-            sentences_src=sentences,
+            sentences_src=all_sentences_src,
             sentences_tgt=outputs,
             flagged=flagged,
             output_text=output_text,
         )
 
 
-def _reassemble(original: str, src_sents: List[str], tgt_sents: List[str]) -> str:
-    """Re-join translated sentences while preserving paragraph breaks.
+def _reassemble(
+    original: str,
+    parts: List[Tuple[bool, str]],
+    tgt_sents: List[str],
+) -> str:
+    """Rebuild text by replacing only sentence chunks.
 
-    Strategy: split original into paragraphs (delimited by blank lines),
-    translate sentences, regroup translated sentences into matching
-    paragraphs by counting how many src sentences came from each paragraph.
+    If sentence-to-text alignment fails, fallback to previous paragraph logic.
     """
-    if not src_sents:
-        return ""
-    paragraphs = original.split("\n\n")
-    # Match each sentence to its paragraph by re-segmenting the paragraph.
-    # (Cheaper alternative: just concatenate with space, lose paragraph breaks.)
-    out_paragraphs = []
+    if not parts:
+        # Fallback for alignment failure: preserve line breaks exactly.
+        src_sents = _segment(original)
+        if not src_sents:
+            return original
+        line_chunks = re.split(r"(\r?\n)", original)  # keep separators
+        out_chunks: List[str] = []
+        sent_idx = 0
+        for chunk in line_chunks:
+            if re.fullmatch(r"\r?\n", chunk):
+                out_chunks.append(chunk)
+                continue
+            segs = _segment(chunk)
+            n = len(segs)
+            if n == 0:
+                out_chunks.append(chunk)
+                continue
+            translated = tgt_sents[sent_idx : sent_idx + n]
+            sent_idx += n
+            out_chunks.append(" ".join(translated))
+        if sent_idx < len(tgt_sents):
+            out_chunks.append(" ".join(tgt_sents[sent_idx:]))
+        return "".join(out_chunks)
+
+    out_chunks: List[str] = []
     sent_idx = 0
-    for para in paragraphs:
-        para_stripped = para.strip()
-        if not para_stripped:
-            out_paragraphs.append("")
+    for is_sentence, chunk in parts:
+        if not is_sentence:
+            out_chunks.append(chunk)
             continue
-        para_sents = _segment(para)
-        n = len(para_sents)
-        if n == 0:
-            out_paragraphs.append(para)  # nothing to translate (e.g. blank)
-            continue
-        translated = tgt_sents[sent_idx : sent_idx + n]
-        sent_idx += n
-        out_paragraphs.append(" ".join(translated))
-    # If any leftover (shouldn't happen) just append
-    if sent_idx < len(tgt_sents):
-        out_paragraphs.append(" ".join(tgt_sents[sent_idx:]))
-    return "\n\n".join(out_paragraphs)
+        if sent_idx < len(tgt_sents):
+            out_chunks.append(tgt_sents[sent_idx])
+            sent_idx += 1
+        else:
+            out_chunks.append(chunk)
+    return "".join(out_chunks)

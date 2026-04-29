@@ -57,13 +57,21 @@ The Advanced menu's *Show fine-tuned models* toggle imports
 repo and is not bundled by default; users who install both repos
 side-by-side get the extra dropdown entries automatically.
 
-### Building a standalone binary
+### Building a standalone binary (local)
 
 ```bash
 pip install pyinstaller>=6.0
-# placeholder spec — to be added with platform-specific tweaks
-pyinstaller --name TransformerMT --windowed --onefile gui/main.py
+pyinstaller --noconfirm --clean --windowed --name TransformerMT --paths . gui/main.py
 ```
 
-PyInstaller specs per OS will be added under `gui/build/` once
-release tooling is in place.
+This creates:
+- macOS: `dist/TransformerMT.app`
+- Windows: `dist/TransformerMT.exe` (when run on Windows)
+
+### Cross-platform release (GitHub Actions)
+
+The workflow at `.github/workflows/gui-release.yml` builds both macOS and
+Windows packages and uploads zipped artifacts.
+
+- Trigger manually in Actions: **Build GUI Release (macOS + Windows)**
+- Or push a tag like `v0.1.0` to build + attach zip files to a GitHub Release.

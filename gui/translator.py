@@ -13,15 +13,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-    QProgressBar, QPushButton, QStatusBar, QTextEdit, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+    QPlainTextEdit, QProgressBar, QPushButton, QStatusBar, QVBoxLayout, QWidget,
 )
 
 from gui.downloader import cache_dir_for, download_model, is_cached
-from gui.inference import TransformerMTRuntime, TranslationResult
+from gui.inference import CancelledError, TransformerMTRuntime, TranslationResult
 from gui.model_registry import (
     DEFAULT_MODEL_KEY, ModelEntry, find_by_key, get_models,
 )
@@ -56,14 +56,18 @@ class DownloadWorker(QThread):
 
 class TranslateWorker(QThread):
     progress = Signal(int, int, str)         # current, total, preview
-    finished_ok = Signal(object)             # TranslationResult
+    finished_ok = Signal(int, object)        # req_id, TranslationResult
+    cancelled = Signal(int)                  # req_id
     failed = Signal(str)
 
-    def __init__(self, runtime: TransformerMTRuntime, text: str, beam: int):
+    def __init__(self, runtime: TransformerMTRuntime, text: str, beam: int,
+                 req_id: int, sentence_cache: Optional[dict] = None):
         super().__init__()
         self.runtime = runtime
         self.text = text
         self.beam = beam
+        self.req_id = req_id
+        self.sentence_cache = sentence_cache
 
     def run(self):
         try:
@@ -71,8 +75,12 @@ class TranslateWorker(QThread):
                 self.text,
                 beam=self.beam,
                 progress_cb=self._on_progress,
+                cancel_check=self.isInterruptionRequested,
+                sentence_cache=self.sentence_cache,
             )
-            self.finished_ok.emit(result)
+            self.finished_ok.emit(self.req_id, result)
+        except CancelledError:
+            self.cancelled.emit(self.req_id)
         except Exception as e:
             self.failed.emit(str(e))
 
@@ -92,6 +100,12 @@ class MainWindow(QMainWindow):
         self._current_model: Optional[ModelEntry] = None
         self._download_worker: Optional[DownloadWorker] = None
         self._translate_worker: Optional[TranslateWorker] = None
+        self._translate_req_id = 0
+        self._latest_applied_req_id = 0
+        self._pending_live_rerun = False
+        self._sentence_cache: dict = {}
+        self._live_enabled = True
+        self._auto_download_attempted: set[str] = set()
 
         self._build_ui()
         self._populate_models()
@@ -113,20 +127,28 @@ class MainWindow(QMainWindow):
         self.download_btn = QPushButton("Download model")
         self.download_btn.clicked.connect(self._on_download_clicked)
         top.addWidget(self.download_btn)
+        self.live_checkbox = QCheckBox("Live")
+        self.live_checkbox.setChecked(True)
+        self.live_checkbox.toggled.connect(self._on_live_toggled)
+        top.addWidget(self.live_checkbox)
+        self.live_hint = QLabel("Tip: Big models can be slow for Live mode.")
+        self.live_hint.setStyleSheet("color: #666;")
+        top.addWidget(self.live_hint)
         outer.addLayout(top)
 
         # --- middle: input / output
         io = QHBoxLayout()
         in_col = QVBoxLayout()
         in_col.addWidget(QLabel("Input (English):"))
-        self.input_edit = QTextEdit()
+        self.input_edit = QPlainTextEdit()
         self.input_edit.setPlaceholderText("Type or paste English text here…")
+        self.input_edit.textChanged.connect(self._on_input_changed)
         in_col.addWidget(self.input_edit)
         io.addLayout(in_col)
 
         out_col = QVBoxLayout()
         out_col.addWidget(QLabel("Output:"))
-        self.output_edit = QTextEdit()
+        self.output_edit = QPlainTextEdit()
         self.output_edit.setReadOnly(True)
         out_col.addWidget(self.output_edit)
         io.addLayout(out_col)
@@ -144,6 +166,10 @@ class MainWindow(QMainWindow):
 
         # status bar
         self.setStatusBar(QStatusBar())
+        self._live_timer = QTimer(self)
+        self._live_timer.setSingleShot(True)
+        self._live_timer.setInterval(400)  # debounce
+        self._live_timer.timeout.connect(self._run_live_translate)
 
         # advanced menu
         menu = self.menuBar().addMenu("Advanced")
@@ -174,6 +200,7 @@ class MainWindow(QMainWindow):
             return
         self._current_model = m
         self._runtime = None  # invalidate cached runtime
+        self._sentence_cache.clear()
         cached = is_cached(m.hf_repo, m.files)
         self.download_btn.setEnabled(not cached)
         self.translate_btn.setEnabled(cached)
@@ -181,6 +208,16 @@ class MainWindow(QMainWindow):
             "Ready — click Translate" if cached
             else f"Click Download (~{m.size_mb_estimate} MB)"
         )
+        if not cached:
+            self._maybe_auto_download_model(m)
+
+    def _maybe_auto_download_model(self, m: ModelEntry):
+        if m.key in self._auto_download_attempted:
+            return
+        if self._download_worker is not None and self._download_worker.isRunning():
+            return
+        self._auto_download_attempted.add(m.key)
+        QTimer.singleShot(0, lambda: self._start_download(m, user_initiated=False))
 
     # ---------------------------------------------------------- download
 
@@ -188,21 +225,30 @@ class MainWindow(QMainWindow):
         m = self._current_model
         if m is None:
             return
+        self._start_download(m, user_initiated=True)
+
+    def _start_download(self, m: ModelEntry, *, user_initiated: bool):
         size = m.size_mb_estimate
-        ans = QMessageBox.question(
-            self, "Download model",
-            f"Download {m.label} (~{size} MB) from HuggingFace Hub?\n"
-            "This may take 1–5 minutes depending on your connection.",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
-        )
-        if ans != QMessageBox.Yes:
-            return
+        if user_initiated:
+            ans = QMessageBox.question(
+                self, "Download model",
+                f"Download {m.label} (~{size} MB) from HuggingFace Hub?\n"
+                "This may take 1–5 minutes depending on your connection.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+            )
+            if ans != QMessageBox.Yes:
+                return
 
         self._set_busy(True, indeterminate=False)
         self.progress.setRange(0, 1000)             # use 0..1000 for fractional %
         self.progress.setValue(0)
         self.progress.setFormat("0%")
-        self.statusBar().showMessage(f"Downloading {m.label}…")
+        if user_initiated:
+            self.statusBar().showMessage(f"Downloading {m.label}…")
+        else:
+            self.statusBar().showMessage(
+                f"First-time setup: downloading {m.label} (~{size} MB)…"
+            )
 
         self._download_worker = DownloadWorker(m)
         self._download_worker.progress.connect(self._on_dl_progress)
@@ -270,14 +316,74 @@ class MainWindow(QMainWindow):
         if not self._ensure_runtime():
             return
 
+        self._start_translation(text=text, live=False)
+
+    def _on_input_changed(self):
+        if not self._live_enabled:
+            return
+        text = self.input_edit.toPlainText().strip()
+        if not text:
+            self._live_timer.stop()
+            self._pending_live_rerun = False
+            # Invalidate any in-flight result immediately.
+            self._latest_applied_req_id = self._translate_req_id + 1
+            if self._translate_worker is not None and self._translate_worker.isRunning():
+                self._translate_worker.requestInterruption()
+            self.output_edit.clear()
+            self.statusBar().showMessage("Ready.")
+            self._set_busy(False)
+            return
+        self._live_timer.start()
+
+    def _on_live_toggled(self, checked: bool):
+        self._live_enabled = checked
+        if not checked:
+            self._live_timer.stop()
+            self._pending_live_rerun = False
+            if self._translate_worker is not None and self._translate_worker.isRunning():
+                self._translate_worker.requestInterruption()
+            self.statusBar().showMessage("Live mode off. Click Translate to run.")
+            return
+        self.statusBar().showMessage("Live mode on.")
+        text = self.input_edit.toPlainText().strip()
+        if text:
+            self._live_timer.start()
+
+    def _run_live_translate(self):
+        if not self._live_enabled:
+            return
+        text = self.input_edit.toPlainText().strip()
+        if not text:
+            return
+        if not self._ensure_runtime():
+            return
+        if self._translate_worker is not None and self._translate_worker.isRunning():
+            self._pending_live_rerun = True
+            self._translate_worker.requestInterruption()
+            return
+        self._start_translation(text=text, live=True)
+
+    def _start_translation(self, *, text: str, live: bool):
+        self._translate_req_id += 1
+        req_id = self._translate_req_id
         self._set_busy(True, indeterminate=True)
         self.progress.setRange(0, 0)
-        self.statusBar().showMessage("Translating…")
-        self.output_edit.clear()
+        if live:
+            self.statusBar().showMessage("Live translating…")
+        else:
+            self.statusBar().showMessage("Translating…")
+            self.output_edit.clear()
 
-        self._translate_worker = TranslateWorker(self._runtime, text, beam=5)
+        self._translate_worker = TranslateWorker(
+            self._runtime,
+            text,
+            beam=5,
+            req_id=req_id,
+            sentence_cache=self._sentence_cache,
+        )
         self._translate_worker.progress.connect(self._on_tr_progress)
         self._translate_worker.finished_ok.connect(self._on_tr_done)
+        self._translate_worker.cancelled.connect(self._on_tr_cancelled)
         self._translate_worker.failed.connect(self._on_tr_failed)
         self._translate_worker.start()
 
@@ -287,7 +393,16 @@ class MainWindow(QMainWindow):
             self.progress.setValue(i)
             self.statusBar().showMessage(f"Translating sentence {i}/{total}…")
 
-    def _on_tr_done(self, result: TranslationResult):
+    def _on_tr_done(self, req_id: int, result: TranslationResult):
+        if req_id < self._latest_applied_req_id:
+            return
+        current_text = self.input_edit.toPlainText().strip()
+        if not current_text:
+            self._set_busy(False)
+            self.output_edit.clear()
+            self.statusBar().showMessage("Ready.")
+            return
+        self._latest_applied_req_id = req_id
         self._set_busy(False)
         self.output_edit.setPlainText(result.output_text)
         n_flagged = sum(result.flagged)
@@ -300,6 +415,21 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Done. {len(result.sentences_tgt)} sentence(s) translated."
             )
+        if self._pending_live_rerun:
+            self._pending_live_rerun = False
+            if self._live_enabled:
+                self._run_live_translate()
+
+    def _on_tr_cancelled(self, _req_id: int):
+        self._set_busy(False)
+        if not self.input_edit.toPlainText().strip():
+            self.output_edit.clear()
+            self.statusBar().showMessage("Ready.")
+            return
+        if self._pending_live_rerun:
+            self._pending_live_rerun = False
+            if self._live_enabled:
+                self._run_live_translate()
 
     def _on_tr_failed(self, err: str):
         self._set_busy(False)
