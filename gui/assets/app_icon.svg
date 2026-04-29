@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F172A"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="aqua" x1="130" y1="126" x2="382" y2="386" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#67E8F9"/>
+      <stop offset="1" stop-color="#14B8A6"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="48" y="48" width="416" height="416" rx="104" fill="url(#bg)"/>
+
+  <path d="M148 188h142c44 0 78 30 78 70s-34 70-78 70h-18v54h-58v-54h-66z"
+        fill="none" stroke="url(#aqua)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <path d="M336 156l52 38-52 38" fill="none" stroke="#93C5FD" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M124 318l52 38-52 38" fill="none" stroke="#93C5FD" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <circle cx="256" cy="256" r="188" fill="none" stroke="#1F2937" stroke-width="8"/>
+</svg>

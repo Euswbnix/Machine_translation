@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
     QPlainTextEdit, QProgressBar, QPushButton, QStatusBar, QVBoxLayout, QWidget,
@@ -94,6 +94,9 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Transformer MT")
+        icon_path = Path(__file__).parent / "assets" / "app_icon.svg"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self.resize(960, 640)
 
         self._runtime: Optional[TransformerMTRuntime] = None
