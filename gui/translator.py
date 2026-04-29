@@ -204,6 +204,13 @@ class MainWindow(QMainWindow):
         cached = is_cached(m.hf_repo, m.files)
         self.download_btn.setEnabled(not cached)
         self.translate_btn.setEnabled(cached)
+        self.input_edit.setReadOnly(not cached)
+        if cached:
+            self.input_edit.setPlaceholderText("Type or paste English text here…")
+        else:
+            self.input_edit.clear()
+            self.input_edit.setPlaceholderText("Please download model first.")
+            self.output_edit.clear()
         self.statusBar().showMessage(
             "Ready — click Translate" if cached
             else f"Click Download (~{m.size_mb_estimate} MB)"
