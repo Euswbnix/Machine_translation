@@ -30,7 +30,8 @@ from gui.model_registry import (
 # ============================================================ workers
 
 class DownloadWorker(QThread):
-    file_started = Signal(int, int, str)     # idx, total, filename
+    # file_idx, file_total, bytes_done, bytes_total, filename
+    progress = Signal(int, int, int, int, str)
     finished_ok = Signal(str)                # local cache dir
     failed = Signal(str)                     # error message
 
@@ -48,8 +49,9 @@ class DownloadWorker(QThread):
         except Exception as e:
             self.failed.emit(str(e))
 
-    def _on_progress(self, i: int, total: int, fname: str):
-        self.file_started.emit(i, total, fname)
+    def _on_progress(self, i: int, total: int, bdone: int, btotal: int,
+                     fname: str):
+        self.progress.emit(i, total, bdone, btotal, fname)
 
 
 class TranslateWorker(QThread):
@@ -197,19 +199,40 @@ class MainWindow(QMainWindow):
             return
 
         self._set_busy(True, indeterminate=False)
-        self.progress.setRange(0, len(m.files))
+        self.progress.setRange(0, 1000)             # use 0..1000 for fractional %
         self.progress.setValue(0)
+        self.progress.setFormat("0%")
         self.statusBar().showMessage(f"Downloading {m.label}…")
 
         self._download_worker = DownloadWorker(m)
-        self._download_worker.file_started.connect(self._on_dl_progress)
+        self._download_worker.progress.connect(self._on_dl_progress)
         self._download_worker.finished_ok.connect(self._on_dl_done)
         self._download_worker.failed.connect(self._on_dl_failed)
         self._download_worker.start()
 
-    def _on_dl_progress(self, i: int, total: int, fname: str):
-        self.progress.setValue(i)
-        self.statusBar().showMessage(f"Downloading {i + 1}/{total}: {fname}")
+    def _on_dl_progress(self, i: int, total_files: int,
+                         bdone: int, btotal: int, fname: str):
+        # Combine per-file progress into a single overall percentage
+        # (assume files are equally weighted by btotal where known, or by
+        # file-count where btotal is unknown for some pre-current file).
+        if btotal > 0:
+            file_frac = bdone / btotal
+        else:
+            file_frac = 0.0
+        overall = (i + file_frac) / max(total_files, 1)
+        self.progress.setValue(int(overall * 1000))
+        self.progress.setFormat(f"{overall * 100:.1f}%")
+        if btotal > 0:
+            mb_done = bdone / 1024 / 1024
+            mb_total = btotal / 1024 / 1024
+            self.statusBar().showMessage(
+                f"Downloading file {i + 1}/{total_files}: "
+                f"{fname}  —  {mb_done:.1f} / {mb_total:.1f} MB"
+            )
+        else:
+            self.statusBar().showMessage(
+                f"Downloading file {i + 1}/{total_files}: {fname}"
+            )
 
     def _on_dl_done(self, _local_dir: str):
         self._set_busy(False)
