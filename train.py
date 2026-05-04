@@ -26,10 +26,21 @@ def main():
     parser.add_argument("--resume", type=str, default=None, help="Checkpoint path to resume from")
     parser.add_argument("--reset-optimizer", action="store_true",
                         help="Reset optimizer/scheduler state on resume (keeps model weights)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Override seed in config (for multi-seed runs)")
+    parser.add_argument("--suffix", type=str, default=None,
+                        help="Append to checkpoint dir and experiment name (e.g. '_s1')")
     args = parser.parse_args()
 
     with open(args.config) as f:
         config = yaml.safe_load(f)
+
+    if args.seed is not None:
+        config["training"]["seed"] = args.seed
+    if args.suffix is not None:
+        config["checkpoint"]["dir"] += args.suffix
+        if "logging" in config and "swanlab" in config["logging"]:
+            config["logging"]["swanlab"]["experiment"] += args.suffix
 
     set_seed(config["training"]["seed"])
 
