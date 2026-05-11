@@ -50,8 +50,13 @@ def translate_checkpoint(ckpt_path: str, out_path: str,
     ]
     print(f"  Translating: {' '.join(cmd)}", file=sys.stderr)
 
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+    # translate.py outputs "SRC: ...\nTGT: ...\n" pairs; extract TGT lines only
     with open(out_path, "w", encoding="utf-8") as f:
-        subprocess.run(cmd, stdout=f, check=True)
+        for line in result.stdout.splitlines():
+            if line.startswith("TGT: "):
+                f.write(line[5:] + "\n")
 
     return {
         "src_lang": src_lang,
