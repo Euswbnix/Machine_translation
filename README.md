@@ -1,5 +1,46 @@
 # Machine Translation: Transformer from Scratch
 
+> [!WARNING]
+> ## Correction — October 2026
+>
+> Parts of this README are wrong. The original text is left in place below for the record; read this first.
+>
+> **1. A bug in this repository's data scripts corrupted two of the training corpora.**
+> `scripts/download_wmt_*.py` left carriage-return characters inside some sentences, and
+> `scripts/clean_data_*.py` read them as line breaks. One side of the corpus gained lines, and from
+> that point on every English sentence was paired with the wrong translation. Nothing crashed and
+> nothing warned.
+>
+> | Corpus | Affected |
+> |---|---|
+> | English–French, 30M pairs ("v2") | wrong from line 16,575,777 to the end — about 45% of the corpus |
+> | English–German, 4.17M pairs | wrong for the last 2.7% |
+> | English–French, 9.3M pairs ("v1.1") | **not affected** |
+>
+> The scripts are now fixed, and the cleaning script refuses input that still contains such
+> characters. Files downloaded before the fix must be downloaded again.
+>
+> **2. Every result obtained on the 30M-pair corpus is withdrawn.** That includes "Base v2 33.90",
+> "Big v2 33.03", "a 9.3M clean corpus beats a 30M noisy one" and "more capacity hurts on noisy
+> data". The corpus was not noisy; it was misaligned by the bug above.
+>
+> **3. "Big beats Base by +0.56 BLEU on clean data" is withdrawn.** It compared a single training
+> run of each model. Repeating each with four random seeds gives 35.11 ± 0.20 (Base) and
+> 35.05 ± 0.62 (Big), so the single-run difference was inside run-to-run variation. Those runs also
+> did not give the two model sizes equal training budgets, so they do not show the models are equal
+> either. The claim that "the sign of the return on capacity is determined by data quality" does
+> not stand.
+>
+> **4. The English–German models were trained on the partly misaligned corpus.** Their scores
+> (24.04 Base, 22.47 Big) are what those two checkpoints measure, but "Big is below Base on
+> English–German" should not be read as a finding about model size.
+>
+> **What still stands:** the two English–French models trained on the 9.3M-pair corpus, as
+> individual checkpoints — Base 35.31 and Big 35.87 sacreBLEU on newstest2014.
+>
+> How the bug was found, the corrected corpora and the follow-up experiments are documented in
+> [Machine-Translation-SFT / phase0 / README.md](https://github.com/Euswbnix/Machine-Translation-SFT/blob/wmt2027-phase0/phase0/README.md).
+
 A from-scratch PyTorch implementation of the Transformer (Vaswani et al., 2017),
 trained on WMT parallel corpora without any pretrained weights.
 
