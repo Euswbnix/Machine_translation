@@ -37,8 +37,14 @@ def main():
 
     print("Pass 1: counting tgt-line frequencies...")
     cnt: Counter = Counter()
-    with open(args.tgt) as f:
+    # newline="\n": LF is the only line break. In default text mode a carriage return
+    # inside a sentence is read as a line break too, which silently shifts the pairing.
+    with open(args.tgt, encoding="utf-8", newline="\n") as f:
         for line in f:
+            if "\r" in line:
+                raise SystemExit(f"{args.tgt} contains a carriage return inside a line: it was "
+                                 "written by the pre-fix downloader. Re-download it with the "
+                                 "current download script before cleaning.")
             cnt[line] += 1
     bad = {l for l, c in cnt.items() if c > args.dup_threshold}
     bad_total = sum(cnt[l] for l in bad)
@@ -49,9 +55,16 @@ def main():
     print("Pass 2: filtering...")
     kept = dropped = 0
     reasons: Counter = Counter()
-    with open(args.src) as fs, open(args.tgt) as ft, \
-            open(args.out_src, "w") as os_, open(args.out_tgt, "w") as ot:
-        for s, t in zip(fs, ft):
+    with open(args.src, encoding="utf-8", newline="\n") as fs, \
+            open(args.tgt, encoding="utf-8", newline="\n") as ft, \
+            open(args.out_src, "w", encoding="utf-8", newline="\n") as os_, \
+            open(args.out_tgt, "w", encoding="utf-8", newline="\n") as ot:
+        # strict: the two sides must have the same number of lines. Plain zip() stops at
+        # the shorter one, which is how a shifted corpus went unnoticed.
+        for s, t in zip(fs, ft, strict=True):
+            if "\r" in s:
+                raise SystemExit(f"{args.src} contains a carriage return inside a line; "
+                                 "re-download it with the current download script.")
             s_stripped = s.strip()
             t_stripped = t.strip()
             sl = len(s_stripped.split())

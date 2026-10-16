@@ -51,18 +51,21 @@ def download_wmt(output_dir: str, max_train_samples: int | None = None):
 
     print(f"\nData saved to {output_dir}")
     for split in ["train", "valid", "test"]:
-        n = sum(1 for _ in open(output_dir / f"{split}.en"))
+        n = sum(1 for _ in open(output_dir / f"{split}.en", encoding="utf-8", newline="\n"))
         print(f"  {split}: {n:,} sentence pairs")
 
 
 def _save_split(data, src_path: Path, tgt_path: Path):
     """Save a dataset split to parallel text files (en source, de target)."""
-    with open(src_path, "w", encoding="utf-8") as f_src, \
-         open(tgt_path, "w", encoding="utf-8") as f_tgt:
+    with open(src_path, "w", encoding="utf-8", newline="\n") as f_src, \
+         open(tgt_path, "w", encoding="utf-8", newline="\n") as f_tgt:
         for example in tqdm(data, desc=f"Writing {src_path.stem}"):
             translation = example["translation"]
-            en = translation["en"].strip().replace("\n", " ")
-            de = translation["de"].strip().replace("\n", " ")
+            # A carriage return INSIDE a sentence must not reach the output file: a reader
+            # in default text mode treats it as a line break, one side gains a line, and
+            # every later pair is shifted (the misalignment found in 2026-09; see README).
+            en = translation["en"].strip().replace("\n", " ").replace("\r", " ")
+            de = translation["de"].strip().replace("\n", " ").replace("\r", " ")
             if en and de:
                 f_src.write(en + "\n")
                 f_tgt.write(de + "\n")
