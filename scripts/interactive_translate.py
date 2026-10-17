@@ -117,7 +117,7 @@ def main():
 
     # Batch mode
     if args.input:
-        with open(args.input, encoding="utf-8") as f:
+        with open(args.input, encoding="utf-8", newline="\n") as f:
             lines = f.readlines()
         hyps = translate_lines(lines, model, tok, cfg, device, beam, lp)
         out_stream = open(args.output, "w", encoding="utf-8") if args.output else sys.stdout

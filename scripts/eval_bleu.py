@@ -76,9 +76,10 @@ def main():
     tok = Tokenizer(cfg["data"]["spm_model"])
 
     # Data
-    with open(args.src, encoding="utf-8") as f:
+    # LF-only, so a carriage return inside a line cannot shift sources against references
+    with open(args.src, encoding="utf-8", newline="\n") as f:
         srcs = [ln.strip() for ln in f]
-    with open(args.ref, encoding="utf-8") as f:
+    with open(args.ref, encoding="utf-8", newline="\n") as f:
         refs = [ln.strip() for ln in f]
     assert len(srcs) == len(refs), f"len mismatch: {len(srcs)} vs {len(refs)}"
 

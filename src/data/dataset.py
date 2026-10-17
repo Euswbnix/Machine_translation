@@ -131,7 +131,7 @@ class TranslationDataset(Dataset):
         (imap) so output offsets are deterministic and byte-for-byte match
         the previous single-process implementation.
         """
-        with open(src_path, "r") as f:
+        with open(src_path, "r", encoding="utf-8", newline="\n") as f:
             n_lines = sum(1 for _ in f)
 
         # Accumulate per-chunk numpy arrays; concatenate once at the end.
@@ -152,8 +152,11 @@ class TranslationDataset(Dataset):
             src_chunk: list[str] = []
             tgt_chunk: list[str] = []
             chunk_idx = 0
-            with open(src_path, "r") as f_src, open(tgt_path, "r") as f_tgt:
-                for src_line, tgt_line in zip(f_src, f_tgt):
+            # LF-only and strict, so a shifted or truncated corpus fails here instead of
+            # training a model on mismatched pairs (2026-10 fix; see README, Correction).
+            with open(src_path, "r", encoding="utf-8", newline="\n") as f_src, \
+                    open(tgt_path, "r", encoding="utf-8", newline="\n") as f_tgt:
+                for src_line, tgt_line in zip(f_src, f_tgt, strict=True):
                     total += 1
                     src_line = src_line.strip()
                     tgt_line = tgt_line.strip()

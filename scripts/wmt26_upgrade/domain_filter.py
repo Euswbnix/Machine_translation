@@ -53,7 +53,7 @@ def train_classifier(args):
         for src_file in data_dir.glob("*.en"):
             fname = src_file.stem.lower()
             if any(p in fname for p in patterns):
-                with open(src_file, encoding="utf-8", errors="replace") as f:
+                with open(src_file, encoding="utf-8", errors="replace", newline="\n") as f:
                     for line in f:
                         line = line.strip()
                         if len(line) > 20:
@@ -113,7 +113,8 @@ def filter_scored(args):
 
     domain_hits = []
     total = 0
-    with open(args.scored_tsv, encoding="utf-8") as f:
+    # LF-only: a carriage return inside the text field would cut a row in two
+    with open(args.scored_tsv, encoding="utf-8", newline="\n") as f:
         for line in f:
             total += 1
             parts = line.rstrip("\n").split("\t", 2)

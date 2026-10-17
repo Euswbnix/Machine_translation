@@ -54,7 +54,9 @@ def translate_checkpoint(ckpt_path: str, out_path: str,
 
     # translate.py outputs "SRC: ...\nTGT: ...\n" pairs; extract TGT lines only
     with open(out_path, "w", encoding="utf-8") as f:
-        for line in result.stdout.splitlines():
+        # split("\n"), not splitlines(): splitlines() also breaks on U+2028, NEL, form feed
+        # and other characters a translation can contain, which cuts that hypothesis short.
+        for line in result.stdout.split("\n"):
             if line.startswith("TGT: "):
                 f.write(line[5:] + "\n")
 
@@ -71,10 +73,12 @@ def translate_checkpoint(ckpt_path: str, out_path: str,
 def eval_bleu(hyp_path: str, ref_path: str) -> float:
     """Compute sacrebleu 13a score."""
     import sacrebleu
-    with open(hyp_path, encoding="utf-8") as fh, \
-         open(ref_path, encoding="utf-8") as fr:
+    with open(hyp_path, encoding="utf-8", newline="\n") as fh, \
+         open(ref_path, encoding="utf-8", newline="\n") as fr:
         hyps = [l.strip() for l in fh]
         refs = [l.strip() for l in fr]
+    if len(hyps) != len(refs):
+        raise SystemExit(f"{hyp_path} has {len(hyps)} lines but {ref_path} has {len(refs)}")
     bleu = sacrebleu.corpus_bleu(hyps, [refs])
     return round(bleu.score, 2)
 
@@ -87,12 +91,14 @@ def eval_comet(src_path: str, hyp_path: str, ref_path: str,
     model_path = download_model(model_name)
     model = load_from_checkpoint(model_path)
 
-    with open(src_path, encoding="utf-8") as fs, \
-         open(hyp_path, encoding="utf-8") as fh, \
-         open(ref_path, encoding="utf-8") as fr:
+    # strict: zip() over files of different lengths used to drop the tail silently and
+    # score a misaligned or partial set
+    with open(src_path, encoding="utf-8", newline="\n") as fs, \
+         open(hyp_path, encoding="utf-8", newline="\n") as fh, \
+         open(ref_path, encoding="utf-8", newline="\n") as fr:
         data = [
             {"src": s.strip(), "mt": h.strip(), "ref": r.strip()}
-            for s, h, r in zip(fs, fh, fr)
+            for s, h, r in zip(fs, fh, fr, strict=True)
         ]
 
     output = model.predict(data, batch_size=64, gpus=1, progress_bar=False)
