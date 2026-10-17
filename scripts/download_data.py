@@ -17,7 +17,9 @@ def download_wmt(output_dir: str, max_train_samples: int | None = None):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Downloading WMT17 zh-en dataset...")
-    dataset = load_dataset("wmt17", "zh-en")
+    # "wmt/wmt17" is the Hub id; the bare "wmt17" relied on a loading script that newer
+    # versions of the datasets library no longer run.
+    dataset = load_dataset("wmt/wmt17", "zh-en")
 
     # Process train split
     print("Processing training data...")
@@ -37,17 +39,23 @@ def download_wmt(output_dir: str, max_train_samples: int | None = None):
 
     print(f"Data saved to {output_dir}")
     for split in ["train", "valid", "test"]:
-        n = sum(1 for _ in open(output_dir / f"{split}.zh"))
+        with open(output_dir / f"{split}.zh", encoding="utf-8", newline="\n") as f:
+            n = sum(1 for _ in f)
         print(f"  {split}: {n:,} sentence pairs")
 
 
 def _save_split(data, src_path: Path, tgt_path: Path):
     """Save a dataset split to parallel text files."""
-    with open(src_path, "w") as f_src, open(tgt_path, "w") as f_tgt:
+    with open(src_path, "w", encoding="utf-8", newline="\n") as f_src, \
+            open(tgt_path, "w", encoding="utf-8", newline="\n") as f_tgt:
         for example in tqdm(data, desc=f"Writing {src_path.stem}"):
             translation = example["translation"]
-            zh = translation["zh"].strip().replace("\n", " ")
-            en = translation["en"].strip().replace("\n", " ")
+            # A carriage return INSIDE a sentence must not reach the file: a reader in default
+            # text mode treats it as a line break, one side gains a line, and every later pair
+            # is shifted. WMT17 zh-en has such sentences from its 21,694th row on, which left
+            # ~99% of the corpus misaligned before this fix (see README, Correction).
+            zh = translation["zh"].strip().replace("\n", " ").replace("\r", " ")
+            en = translation["en"].strip().replace("\n", " ").replace("\r", " ")
             if zh and en:
                 f_src.write(zh + "\n")
                 f_tgt.write(en + "\n")

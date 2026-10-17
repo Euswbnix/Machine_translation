@@ -78,9 +78,9 @@ def main():
     # Load valid set
     src_path = cfg["data"]["valid_src"]
     tgt_path = cfg["data"]["valid_tgt"]
-    with open(src_path, "r", encoding="utf-8") as f:
+    with open(src_path, "r", encoding="utf-8", newline="\n") as f:
         src_lines = [ln.strip() for ln in f]
-    with open(tgt_path, "r", encoding="utf-8") as f:
+    with open(tgt_path, "r", encoding="utf-8", newline="\n") as f:
         tgt_lines = [ln.strip() for ln in f]
     assert len(src_lines) == len(tgt_lines), "valid src/tgt length mismatch"
     print(f"Valid set: {len(src_lines)} lines")

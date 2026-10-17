@@ -5,9 +5,10 @@
 >
 > Parts of this README are wrong. The original text is left in place below for the record; read this first.
 >
-> **1. A bug in this repository's data scripts corrupted two of the training corpora.**
-> `scripts/download_wmt_*.py` left carriage-return characters inside some sentences, and
-> `scripts/clean_data_*.py` read them as line breaks. One side of the corpus gained lines, and from
+> **1. A bug in this repository's data scripts corrupted three of the training corpora.**
+> The download scripts (`scripts/download_wmt_*.py`, and `scripts/download_data.py` for zh-en) left
+> carriage-return characters inside some sentences, and the cleaning scripts (`scripts/clean_data*.py`)
+> read them as line breaks. One side of the corpus gained lines, and from
 > that point on every English sentence was paired with the wrong translation. Nothing crashed and
 > nothing warned.
 >
@@ -16,9 +17,10 @@
 > | English–French, 30M pairs ("v2") | wrong from line 16,575,777 to the end — about 45% of the corpus |
 > | English–German, 4.17M pairs | wrong for the last 2.7% |
 > | English–French, 9.3M pairs ("v1.1") | **not affected** |
+> | Chinese–English, WMT17 | wrong from the 21,711th pair of the download onward: replaying the original scripts on the first 1.93M pairs leaves **98.9%** of them with the wrong partner |
 >
-> The scripts are now fixed, and the cleaning script refuses input that still contains such
-> characters. Files downloaded before the fix must be downloaded again.
+> Files downloaded before the fix must be downloaded again. Every script with the same flaw is
+> fixed; see "What was fixed" below.
 >
 > **2. Every result obtained on the 30M-pair corpus is withdrawn.** That includes "Base v2 33.90",
 > "Big v2 33.03", "a 9.3M clean corpus beats a 30M noisy one" and "more capacity hurts on noisy
@@ -35,8 +37,32 @@
 > (24.04 Base, 22.47 Big) are what those two checkpoints measure, but "Big is below Base on
 > English–German" should not be read as a finding about model size.
 >
+> **5. The Chinese–English failure was this bug, not the model.** The two "Failure Case" sections
+> below blame the language pair, the shared vocabulary, a language-model shortcut and boilerplate
+> attractors. Those explanations are superseded: from its 21,711th pair on, almost every Chinese
+> sentence was trained against an unrelated English one, so there was nothing for cross-attention
+> to learn, and a model that ignores the source is the best fit to such data. That matches every
+> recorded symptom (loss stuck at 4.2–4.8, fluent English unrelated to the input). This was found
+> by replaying the original scripts on the same public data (`wmt/wmt17`, zh-en); a check against
+> the original training files is still to be done.
+>
 > **What still stands:** the two English–French models trained on the 9.3M-pair corpus, as
 > individual checkpoints — Base 35.31 and Big 35.87 sacreBLEU on newstest2014.
+>
+> ### What was fixed
+>
+> | File | What was wrong | Fix |
+> |---|---|---|
+> | `scripts/download_wmt_enfr.py`, `download_wmt_ende.py`, `download_data.py` (zh-en) | kept carriage returns inside sentences | written as a space; files written UTF-8 with LF line ends. `download_data.py` also loads `wmt/wmt17`, which current versions of `datasets` require |
+> | `scripts/clean_data_enfr.py`, `clean_data_ende.py`, `clean_data.py` (zh-en), `wmt26_upgrade/clean_data_enzh.py` | read a carriage return as a line break, then paired the two files with `zip()`, which stops silently at the shorter one | LF is the only line break; input that still contains a carriage return is refused; both sides must have the same number of lines |
+> | `src/data/dataset.py` (the trainer's data loader) | the same pairing as the cleaners, so a shifted corpus would train without an error | LF-only, both sides must have the same number of lines. On a clean corpus the tokenised data and its cache file are byte-identical to before |
+> | `scripts/wmt26_upgrade/eval_comet.py` | `splitlines()` cut a translation at U+2028, NEL or a form feed; `zip()` over source, hypothesis and reference dropped the tail silently | splits on LF only; all three files must have the same length |
+> | `translate.py` | dropped empty input lines, so its output was shorter than the input and every later hypothesis was scored against the wrong reference; no explicit encoding | one output per input line, empty ones included; UTF-8 |
+> | `scripts/eval_bleu.py`, `quick_translate_check.py`, `interactive_translate.py`, `wmt26_upgrade/llm_judge.py`, `wmt26_upgrade/domain_filter.py` | text-mode reads that split on a carriage return (the BLEU tools already checked lengths, so they failed loudly rather than silently) | LF-only and UTF-8 |
+>
+> Each fix was checked against the previous version on the same inputs: with a carriage return
+> inside a line the old scripts misalign or truncate and the new ones refuse or stay aligned;
+> without one, the outputs are byte-identical.
 >
 > How the bug was found, the corrected corpora and the follow-up experiments are documented in
 > [Machine-Translation-SFT / phase0 / README.md](https://github.com/Euswbnix/Machine-Translation-SFT/blob/wmt2027-phase0/phase0/README.md).
@@ -486,6 +512,9 @@ ceiling on pure WMT data.
 
 ### Why this worked (contrast with zh-en)
 
+> **Correction (October 2026):** the contrast drawn here is superseded. The zh-en corpus was
+> misaligned by the data bug described at the top of this README; this en-fr corpus was not.
+
 Same codebase, same Transformer, same training loop — different outcome.
 The differences that matter:
 
@@ -892,6 +921,10 @@ Remaining items:
 
 ## Failure Case: Base on WMT17 zh-en
 
+> **Correction (October 2026):** the corpus this section describes was misaligned by the data bug
+> explained at the top of this README — about 99% of the pairs had the wrong partner. The diagnosis
+> below was written before that was known and is superseded.
+
 The Base config was trained to ~700K steps on cleaned WMT17 zh-en (19M pairs).
 It **failed to converge in any useful sense** — loss plateaued at ~4.22 and
 valid BLEU never crossed 1.0. Kept here as a cautionary baseline.
@@ -964,6 +997,10 @@ What actually happened:
   long-running jobs die when the browser session closes.
 
 ## Failure Case: Big on WMT17 zh-en
+
+> **Correction (October 2026):** the corpus this section describes was misaligned by the data bug
+> explained at the top of this README — about 99% of the pairs had the wrong partner. The diagnosis
+> below was written before that was known and is superseded.
 
 After Base failed, we moved to Big (213M params) hoping extra capacity would
 break the mode-collapse ceiling. It didn't. Across multiple training attempts

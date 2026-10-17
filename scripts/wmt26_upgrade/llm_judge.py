@@ -94,14 +94,12 @@ def main():
 
     random.seed(args.seed)
 
-    with open(args.src) as f:
-        srcs = [l.strip() for l in f]
-    with open(args.ref) as f:
-        refs = [l.strip() for l in f]
-    with open(args.hyp_a) as f:
-        hyps_a = [l.strip() for l in f]
-    with open(args.hyp_b) as f:
-        hyps_b = [l.strip() for l in f]
+    # UTF-8 and LF-only: the locale default breaks Chinese on Windows, and a carriage return
+    # inside a line would shift one file against the others.
+    def read(path):
+        with open(path, encoding="utf-8", newline="\n") as f:
+            return [l.strip() for l in f]
+    srcs, refs, hyps_a, hyps_b = read(args.src), read(args.ref), read(args.hyp_a), read(args.hyp_b)
 
     assert len(srcs) == len(refs) == len(hyps_a) == len(hyps_b)
 

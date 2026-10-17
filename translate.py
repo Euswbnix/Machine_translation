@@ -47,12 +47,17 @@ def main():
     tokenizer = Tokenizer(config["data"]["spm_model"])
 
     # Read input
+    # From a file, keep one output per input line, empty ones included: dropping empty lines
+    # made the output shorter than the input, which shifts every later hypothesis against its
+    # reference in any script that scores the output line by line (2026-10 fix).
     if args.input:
-        with open(args.input) as f:
-            sentences = [line.strip() for line in f if line.strip()]
+        with open(args.input, encoding="utf-8", newline="\n") as f:
+            all_lines = [line.strip() for line in f]
     else:
         print("Enter text to translate (Ctrl+D to finish):")
-        sentences = [line.strip() for line in sys.stdin if line.strip()]
+        all_lines = [line.strip() for line in sys.stdin if line.strip()]
+    keep = [i for i, s in enumerate(all_lines) if s]
+    sentences = [all_lines[i] for i in keep]
 
     # Translate
     translations = beam_search_translate(
@@ -65,7 +70,10 @@ def main():
         device=device,
     )
 
-    for src, tgt in zip(sentences, translations):
+    by_line = [""] * len(all_lines)
+    for i, tgt in zip(keep, translations, strict=True):
+        by_line[i] = tgt
+    for src, tgt in zip(all_lines, by_line, strict=True):
         print(f"SRC: {src}")
         print(f"TGT: {tgt}")
         print()

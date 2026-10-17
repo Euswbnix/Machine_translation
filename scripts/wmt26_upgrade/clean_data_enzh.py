@@ -66,12 +66,18 @@ def main():
     total = 0
     reasons = {"empty": 0, "dup": 0, "len": 0, "ratio": 0, "script": 0}
 
-    with open(args.src, encoding="utf-8") as fs, \
-         open(args.tgt, encoding="utf-8") as ft, \
-         open(args.src_out, "w", encoding="utf-8") as fso, \
-         open(args.tgt_out, "w", encoding="utf-8") as fto:
+    # newline="\n": LF is the only line break. In default text mode a carriage return inside a
+    # line is read as a line break too, which silently shifts every later pair (2026-10 fix).
+    with open(args.src, encoding="utf-8", newline="\n") as fs, \
+         open(args.tgt, encoding="utf-8", newline="\n") as ft, \
+         open(args.src_out, "w", encoding="utf-8", newline="\n") as fso, \
+         open(args.tgt_out, "w", encoding="utf-8", newline="\n") as fto:
 
-        for src, tgt in zip(fs, ft):
+        # strict: both sides must have the same number of lines (plain zip() truncates).
+        for src, tgt in zip(fs, ft, strict=True):
+            if "\r" in src or "\r" in tgt:
+                raise SystemExit("an input line contains a carriage return; its writer kept it "
+                                 "inside a sentence. Replace it with a space when writing the files.")
             total += 1
             src = src.strip()
             tgt = tgt.strip()
